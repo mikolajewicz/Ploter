@@ -11,3 +11,4 @@ private:
     int dirPin;
     int enablePin;  
 };
+
