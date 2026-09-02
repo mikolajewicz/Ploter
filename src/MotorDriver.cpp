@@ -152,3 +152,32 @@ uint32_t MotorDriver::getSpeed() const {
 bool MotorDriver::getDirection() const {
     return direction;
 }
+
+void MotorDriver::followTrajectory(const std::vector<int>& stepTrajectory, double timeStep) {
+    for (size_t i = 0; i < stepTrajectory.size(); ++i) {
+
+        int step = stepTrajectory[i];
+        
+        if (step > 0) {
+            setDirection(true);
+        } else if (step < 0) {
+            setDirection(false);
+        } else {
+            continue; // Skip if step is zero
+        }
+
+
+        setSpeed(abs(step) / timeStep);
+    }
+}
+
+void MotorDriver::step() {
+    if (!enabled) {
+        return;
+    }
+
+    // Wygeneruj impuls STEP.
+    digitalWrite(stepPin, HIGH);
+    delayMicroseconds(1); // Krótki czas trwania impulsu
+    digitalWrite(stepPin, LOW);
+}

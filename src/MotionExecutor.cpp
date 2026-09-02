@@ -46,9 +46,12 @@ void MotionExecutor::update()
             digitalWrite(motorDriver.getDirPin(), LOW);
         }
 
-        if (stepValue > 0) {
+        if (std::abs(stepValue) > 0) {
             motorDriver.step();
-            stepPeriodUs = intervalDurationUs / stepValue;
+            stepPeriodUs = intervalDurationUs / std::abs(stepValue);
+        }
+        else {
+            stepPeriodUs = 0;
         }
 
         nextStepTime = currentTime + stepPeriodUs;
