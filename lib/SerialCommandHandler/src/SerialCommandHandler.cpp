@@ -2,13 +2,19 @@
 
 #include <TMCStepper.h>
 #include "MotorDriver.hpp"
+#include "MotionExecutor.hpp"
+#include "TrajectoryGenerator.hpp"
 
 SerialCommandHandler::SerialCommandHandler(
     MotorDriver& motor,
-    TMC2209Stepper& tmc
+    TMC2209Stepper& tmc,
+    MotionExecutor* motionExecutor,
+    TrajectoryGenerator* trajectoryGenerator
 )
     : motor_(motor),
-      tmc_(tmc) {
+      tmc_(tmc),
+      motionExecutor_(motionExecutor),
+      trajectoryGenerator_(trajectoryGenerator) {
 }
 
 void SerialCommandHandler::printHelp() {
@@ -25,6 +31,7 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  microsteps <wartosc>");
     Serial.println("  mode stealth");
     Serial.println("  mode spread");
+    Serial.println("  sine <amplitude> <frequency> <dt>");
     Serial.println("  status");
     Serial.println("  help");
     Serial.println();
@@ -34,6 +41,7 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  dir 0");
     Serial.println("  rms 700");
     Serial.println("  microsteps 16");
+    Serial.println("  sine 100 2 0.01");
     Serial.println();
 }
 
@@ -87,6 +95,27 @@ bool SerialCommandHandler::parseLongArgument(
         argument.c_str(),
         &endPointer,
         10
+    );
+
+    return (
+        endPointer != argument.c_str() &&
+        *endPointer == '\0'
+    );
+}
+
+bool SerialCommandHandler::parseDoubleArgument(
+    const String& argument,
+    double& result
+) {
+    if (argument.length() == 0) {
+        return false;
+    }
+
+    char* endPointer = nullptr;
+
+    result = strtod(
+        argument.c_str(),
+        &endPointer
     );
 
     return (
@@ -338,6 +367,101 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         Serial.println(
             "Uzycie: mode stealth lub mode spread"
         );
+        return;
+    }
+
+    // ------------------------------------------------
+    // sine
+    // ------------------------------------------------
+
+    if (command == "sine") {
+        if (motionExecutor_ == nullptr || trajectoryGenerator_ == nullptr) {
+            Serial.println(
+                "Komenda sine jest niezainicjalizowana."
+            );
+            return;
+        }
+
+        String params[3];
+        String remaining = argument;
+        remaining.trim();
+
+        for (int i = 0; i < 3; ++i) {
+            int separator = remaining.indexOf(' ');
+
+            if (separator < 0) {
+                params[i] = remaining;
+                remaining = "";
+            } else {
+                params[i] = remaining.substring(0, separator);
+                remaining = remaining.substring(separator + 1);
+                remaining.trim();
+            }
+
+            params[i].trim();
+
+            if (params[i].length() == 0) {
+                Serial.println(
+                    "Uzycie: sine <amplitude> <frequency> <dt>"
+                );
+                return;
+            }
+        }
+
+        double amplitude = 0.0;
+        double frequency = 0.0;
+        double timeStep = 0.0;
+
+        if (!parseDoubleArgument(params[0], amplitude) ||
+            !parseDoubleArgument(params[1], frequency) ||
+            !parseDoubleArgument(params[2], timeStep)) {
+            Serial.println(
+                "Uzycie: sine <amplitude> <frequency> <dt>"
+            );
+            return;
+        }
+
+        if (amplitude < 0.0) {
+            Serial.println("Amplituda nie moze byc ujemna");
+            return;
+        }
+
+        if (frequency <= 0.0) {
+            Serial.println("Czestotliwosc musi byc > 0");
+            return;
+        }
+
+        if (timeStep <= 0.0) {
+            Serial.println("Krok czasowy musi byc > 0");
+            return;
+        }
+
+        std::vector<int> stepTrajectory;
+        const double duration = 1.0 / frequency;
+
+        trajectoryGenerator_->sinusoidalTrajectory(
+            amplitude,
+            frequency,
+            duration,
+            timeStep
+        );
+        trajectoryGenerator_->convertToSteps(stepTrajectory);
+
+        motionExecutor_->setTimeStep(timeStep);
+        motionExecutor_->start(stepTrajectory, timeStep);
+
+        if (!motor_.isEnabled()) {
+            motor_.enable();
+        }
+
+        Serial.print("Sine configured: amplitude=");
+        Serial.print(amplitude);
+        Serial.print(", frequency=");
+        Serial.print(frequency);
+        Serial.print("Hz, dt=");
+        Serial.print(timeStep);
+        Serial.println("s");
+
         return;
     }
 

@@ -27,14 +27,14 @@ void MotionExecutor::update()
     // Która godzina?
     uint32_t currentTime = micros();
 
-    if (currentInterval >= trajectory->size()) {
+    if (static_cast<int32_t>(currentTime - nextIntervalTime) >= 0) {
+
+        if (currentInterval >= trajectory->size()) {
         active = false;
         return;
-    }
+        }
 
-    int stepValue = (*trajectory)[currentInterval];
-
-    if (currentTime >= nextIntervalTime) {
+        int stepValue = (*trajectory)[currentInterval];
         nextIntervalTime += intervalDurationUs;
         stepsRemaining = std::abs(stepValue);
 
@@ -46,26 +46,23 @@ void MotionExecutor::update()
             // Jeśli stepValue == 0, to nie zmieniamy kierunku.
         }
 
-        if (stepValue != 0) {
+        if (stepsRemaining > 0) {
+            stepPeriodUs =
+            intervalDurationUs /
+            static_cast<uint32_t>(stepsRemaining);
+
             motorDriver.step();
             stepsRemaining--;
-            stepPeriodUs = intervalDurationUs / std::abs(stepValue);
-        }
+
+            nextStepTime = currentTime + stepPeriodUs;
+        } 
         else {
             stepPeriodUs = 0;
-            nextStepTime = nextIntervalTime;
         }
-
-        nextStepTime = currentTime + stepPeriodUs;
-
-        nextIntervalTime = currentTime + intervalDurationUs;
-
-        if (currentInterval != 0) {
-            currentInterval++;
-        }
+        currentInterval++;
     }
 
-    if (stepsRemaining != 0 && currentTime >= nextStepTime) {
+    if (stepsRemaining > 0 &&static_cast<int32_t>(currentTime - nextStepTime) >= 0) {
         
         nextStepTime += stepPeriodUs;
         stepsRemaining--;
