@@ -41,17 +41,21 @@ void MotionExecutor::update()
         stepsRemaining = std::abs(stepValue);
 
         if (stepValue > 0) {
-            digitalWrite(motorDriver.getDirPin(), HIGH);
+            motorDriver.setDirection(true);
         } else if (stepValue < 0) {
-            digitalWrite(motorDriver.getDirPin(), LOW);
+            motorDriver.setDirection(false);
+        } else {
+            // Jeśli stepValue == 0, to nie zmieniamy kierunku.
         }
 
-        if (std::abs(stepValue) > 0) {
+        if (stepValue != 0) {
             motorDriver.step();
+            stepsRemaining--;
             stepPeriodUs = intervalDurationUs / std::abs(stepValue);
         }
         else {
             stepPeriodUs = 0;
+            nextStepTime = nextIntervalTime;
         }
 
         nextStepTime = currentTime + stepPeriodUs;
