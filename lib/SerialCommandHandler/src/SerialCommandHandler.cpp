@@ -6,79 +6,112 @@
 #include "TrajectoryGenerator.hpp"
 
 SerialCommandHandler::SerialCommandHandler(
-    MotorDriver& motor,
-    TMC2209Stepper& tmc,
-    MotionExecutor* motionExecutor,
-    TrajectoryGenerator* trajectoryGenerator
+    MotorDriver& motor1,
+    MotorDriver& motor2,
+    TMC2209Stepper& tmc1,
+    TMC2209Stepper& tmc2,
+    MotionExecutor* motionExecutor1,
+    MotionExecutor* motionExecutor2,
+    TrajectoryGenerator* trajectoryGenerator1,
+    TrajectoryGenerator* trajectoryGenerator2
 )
-    : motor_(motor),
-      tmc_(tmc),
-      motionExecutor_(motionExecutor),
-      trajectoryGenerator_(trajectoryGenerator) {
+    : motors_{&motor1, &motor2},
+      tmcs_{&tmc1, &tmc2},
+      motionExecutors_{motionExecutor1, motionExecutor2},
+      trajectoryGenerators_{trajectoryGenerator1, trajectoryGenerator2} {
+}
+
+int SerialCommandHandler::resolveAxis(const String& value) const {
+    if (value == "1") {
+        return 0;
+    }
+
+    if (value == "2") {
+        return 1;
+    }
+
+    return 0;
+}
+
+MotorDriver& SerialCommandHandler::motorForAxis(int axis) const {
+    return *motors_[axis];
+}
+
+TMC2209Stepper& SerialCommandHandler::tmcForAxis(int axis) const {
+    return *tmcs_[axis];
+}
+
+MotionExecutor* SerialCommandHandler::motionExecutorForAxis(int axis) const {
+    return motionExecutors_[axis];
+}
+
+TrajectoryGenerator* SerialCommandHandler::trajectoryGeneratorForAxis(int axis) const {
+    return trajectoryGenerators_[axis];
 }
 
 void SerialCommandHandler::printHelp() {
     Serial.println();
     Serial.println("Dostepne komendy:");
-    Serial.println("  enable");
-    Serial.println("  disable");
-    Serial.println("  start");
-    Serial.println("  stop");
-    Serial.println("  speed <kroki/s>");
-    Serial.println("  dir 0");
-    Serial.println("  dir 1");
-    Serial.println("  rms <mA>");
-    Serial.println("  microsteps <wartosc>");
-    Serial.println("  mode stealth");
-    Serial.println("  mode spread");
-    Serial.println("  sine <amplitude> <frequency> <dt>");
-    Serial.println("  status");
+    Serial.println("  [1|2] enable");
+    Serial.println("  [1|2] disable");
+    Serial.println("  [1|2] start");
+    Serial.println("  [1|2] stop");
+    Serial.println("  [1|2] speed <kroki/s>");
+    Serial.println("  [1|2] dir 0");
+    Serial.println("  [1|2] dir 1");
+    Serial.println("  [1|2] rms <mA>");
+    Serial.println("  [1|2] microsteps <wartosc>");
+    Serial.println("  [1|2] mode stealth");
+    Serial.println("  [1|2] mode spread");
+    Serial.println("  [1|2] sine <amplitude> <frequency> <dt>");
+    Serial.println("  [1|2] status");
     Serial.println("  help");
     Serial.println();
 
     Serial.println("Przyklady:");
-    Serial.println("  speed 1000");
-    Serial.println("  dir 0");
-    Serial.println("  rms 700");
-    Serial.println("  microsteps 16");
-    Serial.println("  sine 100 2 0.01");
+    Serial.println("  1 speed 1000");
+    Serial.println("  2 dir 0");
+    Serial.println("  1 rms 700");
+    Serial.println("  2 sine 100 2 0.01");
+    Serial.println();
+}
+
+void SerialCommandHandler::printStatusForAxis(int axis) {
+    MotorDriver& motor = motorForAxis(axis);
+    TMC2209Stepper& tmc = tmcForAxis(axis);
+
+    Serial.print("--- Axis ");
+    Serial.print(axis + 1);
+    Serial.println(" ---");
+
+    Serial.print("Enabled: ");
+    Serial.println(motor.isEnabled() ? "yes" : "no");
+
+    Serial.print("Running: ");
+    Serial.println(motor.isRunning() ? "yes" : "no");
+
+    Serial.print("Speed: ");
+    Serial.print(motor.getSpeed());
+    Serial.println(" steps/s");
+
+    Serial.print("Direction: ");
+    Serial.println(motor.getDirection() ? "1" : "0");
+
+    Serial.print("IFCNT: ");
+    Serial.println(tmc.IFCNT());
+
+    Serial.print("TMC version: ");
+    Serial.println(tmc.version());
+
+    Serial.print("DRV_STATUS: 0x");
+    Serial.println(tmc.DRV_STATUS(), HEX);
+
     Serial.println();
 }
 
 void SerialCommandHandler::printStatus() {
-    Serial.println();
-    Serial.println("----- STATUS -----");
-
-    Serial.print("Enabled: ");
-    Serial.println(
-        motor_.isEnabled() ? "yes" : "no"
-    );
-
-    Serial.print("Running: ");
-    Serial.println(
-        motor_.isRunning() ? "yes" : "no"
-    );
-
-    Serial.print("Speed: ");
-    Serial.print(motor_.getSpeed());
-    Serial.println(" steps/s");
-
-    Serial.print("Direction: ");
-    Serial.println(
-        motor_.getDirection() ? "1" : "0"
-    );
-
-    Serial.print("IFCNT: ");
-    Serial.println(tmc_.IFCNT());
-
-    Serial.print("TMC version: ");
-    Serial.println(tmc_.version());
-
-    Serial.print("DRV_STATUS: 0x");
-    Serial.println(tmc_.DRV_STATUS(), HEX);
-
-    Serial.println("------------------");
-    Serial.println();
+    printStatusForAxis(0);
+    printStatusForAxis(1);
 }
 
 bool SerialCommandHandler::parseLongArgument(
@@ -131,21 +164,42 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         return;
     }
 
-    int separatorPosition = line.indexOf(' ');
+    int firstSeparator = line.indexOf(' ');
+    String firstToken;
+    String remaining = line;
+
+    if (firstSeparator >= 0) {
+        firstToken = line.substring(0, firstSeparator);
+        remaining = line.substring(firstSeparator + 1);
+        remaining.trim();
+    } else {
+        firstToken = line;
+        remaining = "";
+    }
+
+    int axis = 0;
+    String commandLine = line;
+
+    if (firstToken == "1" || firstToken == "2") {
+        axis = resolveAxis(firstToken);
+        commandLine = remaining;
+    }
+
+    int separatorPosition = commandLine.indexOf(' ');
 
     String command;
     String argument;
 
     if (separatorPosition < 0) {
-        command = line;
+        command = commandLine;
         argument = "";
     } else {
-        command = line.substring(
+        command = commandLine.substring(
             0,
             separatorPosition
         );
 
-        argument = line.substring(
+        argument = commandLine.substring(
             separatorPosition + 1
         );
 
@@ -153,15 +207,21 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     }
 
     command.toLowerCase();
+    MotorDriver& motor = motorForAxis(axis);
+    TMC2209Stepper& tmc = tmcForAxis(axis);
+    MotionExecutor* motionExecutor = motionExecutorForAxis(axis);
+    TrajectoryGenerator* trajectoryGenerator = trajectoryGeneratorForAxis(axis);
 
     // ------------------------------------------------
     // enable
     // ------------------------------------------------
 
     if (command == "enable") {
-        motor_.enable();
+        motor.enable();
 
-        Serial.println("Motor enabled");
+        Serial.print("Motor axis ");
+        Serial.print(axis + 1);
+        Serial.println(" enabled");
         return;
     }
 
@@ -170,9 +230,11 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     // ------------------------------------------------
 
     if (command == "disable") {
-        motor_.disable();
+        motor.disable();
 
-        Serial.println("Motor disabled");
+        Serial.print("Motor axis ");
+        Serial.print(axis + 1);
+        Serial.println(" disabled");
         return;
     }
 
@@ -181,18 +243,22 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     // ------------------------------------------------
 
     if (command == "start") {
-        if (!motor_.isEnabled()) {
-            motor_.enable();
+        motor.setMotionMode(MotorDriver::MotionMode::ConstantSpeed);
+
+        if (!motor.isEnabled()) {
+            motor.enable();
         }
 
-        motor_.start();
+        motor.start();
 
-        if (motor_.getSpeed() == 0) {
+        if (motor.getSpeed() == 0) {
             Serial.println(
                 "Nie mozna uruchomic: speed = 0"
             );
         } else {
-            Serial.println("Motor started");
+            Serial.print("Motor axis ");
+            Serial.print(axis + 1);
+            Serial.println(" started");
         }
 
         return;
@@ -203,9 +269,12 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     // ------------------------------------------------
 
     if (command == "stop") {
-        motor_.stop();
+        motor.setMotionMode(MotorDriver::MotionMode::ConstantSpeed);
+        motor.stop();
 
-        Serial.println("Motor stopped");
+        Serial.print("Motor axis ");
+        Serial.print(axis + 1);
+        Serial.println(" stopped");
         return;
     }
 
@@ -230,11 +299,14 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             return;
         }
 
-        motor_.setSpeed(
+        motor.setMotionMode(MotorDriver::MotionMode::ConstantSpeed);
+        motor.setSpeed(
             static_cast<uint32_t>(value)
         );
 
-        Serial.print("Speed set to: ");
+        Serial.print("Axis ");
+        Serial.print(axis + 1);
+        Serial.print(" speed set to: ");
         Serial.print(value);
         Serial.println(" steps/s");
 
@@ -247,16 +319,20 @@ void SerialCommandHandler::handleSerialCommand(String line) {
 
     if (command == "dir") {
         if (argument == "0") {
-            motor_.setDirection(false);
+            motor.setDirection(false);
 
-            Serial.println("Direction set to: 0");
+            Serial.print("Axis ");
+            Serial.print(axis + 1);
+            Serial.println(" direction set to: 0");
             return;
         }
 
         if (argument == "1") {
-            motor_.setDirection(true);
+            motor.setDirection(true);
 
-            Serial.println("Direction set to: 1");
+            Serial.print("Axis ");
+            Serial.print(axis + 1);
+            Serial.println(" direction set to: 1");
             return;
         }
 
@@ -283,11 +359,13 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             return;
         }
 
-        tmc_.rms_current(
+        tmc.rms_current(
             static_cast<uint16_t>(value)
         );
 
-        Serial.print("RMS current set to: ");
+        Serial.print("Axis ");
+        Serial.print(axis + 1);
+        Serial.print(" RMS current set to: ");
         Serial.print(value);
         Serial.println(" mA");
 
@@ -318,13 +396,13 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             case 64:
             case 128:
             case 256:
-                tmc_.microsteps(
+                tmc.microsteps(
                     static_cast<uint16_t>(value)
                 );
 
-                Serial.print(
-                    "Microsteps set to: "
-                );
+                Serial.print("Axis ");
+                Serial.print(axis + 1);
+                Serial.print(" microsteps set to: ");
                 Serial.println(value);
                 return;
 
@@ -346,21 +424,21 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         mode.toLowerCase();
 
         if (mode == "stealth") {
-            tmc_.en_spreadCycle(false);
-            tmc_.pwm_autoscale(true);
+            tmc.en_spreadCycle(false);
+            tmc.pwm_autoscale(true);
 
-            Serial.println(
-                "Mode set to StealthChop"
-            );
+            Serial.print("Axis ");
+            Serial.print(axis + 1);
+            Serial.println(" mode set to StealthChop");
             return;
         }
 
         if (mode == "spread") {
-            tmc_.en_spreadCycle(true);
+            tmc.en_spreadCycle(true);
 
-            Serial.println(
-                "Mode set to SpreadCycle"
-            );
+            Serial.print("Axis ");
+            Serial.print(axis + 1);
+            Serial.println(" mode set to SpreadCycle");
             return;
         }
 
@@ -375,7 +453,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     // ------------------------------------------------
 
     if (command == "sine") {
-        if (motionExecutor_ == nullptr || trajectoryGenerator_ == nullptr) {
+        if (motionExecutor == nullptr || trajectoryGenerator == nullptr) {
             Serial.println(
                 "Komenda sine jest niezainicjalizowana."
             );
@@ -383,19 +461,19 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         }
 
         String params[3];
-        String remaining = argument;
-        remaining.trim();
+        String remainingArgs = argument;
+        remainingArgs.trim();
 
         for (int i = 0; i < 3; ++i) {
-            int separator = remaining.indexOf(' ');
+            int separator = remainingArgs.indexOf(' ');
 
             if (separator < 0) {
-                params[i] = remaining;
-                remaining = "";
+                params[i] = remainingArgs;
+                remainingArgs = "";
             } else {
-                params[i] = remaining.substring(0, separator);
-                remaining = remaining.substring(separator + 1);
-                remaining.trim();
+                params[i] = remainingArgs.substring(0, separator);
+                remainingArgs = remainingArgs.substring(separator + 1);
+                remainingArgs.trim();
             }
 
             params[i].trim();
@@ -439,22 +517,23 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         std::vector<int> stepTrajectory;
         const double duration = 1.0 / frequency;
 
-        trajectoryGenerator_->sinusoidalTrajectory(
+        trajectoryGenerator->sinusoidalTrajectory(
             amplitude,
             frequency,
             duration,
             timeStep
         );
-        trajectoryGenerator_->convertToSteps(stepTrajectory);
+        trajectoryGenerator->convertToSteps(stepTrajectory);
 
-        motionExecutor_->setTimeStep(timeStep);
-        motionExecutor_->start(stepTrajectory, timeStep);
+        motionExecutor->start(stepTrajectory, timeStep);
 
-        if (!motor_.isEnabled()) {
-            motor_.enable();
+        if (!motor.isEnabled()) {
+            motor.enable();
         }
 
-        Serial.print("Sine configured: amplitude=");
+        Serial.print("Axis ");
+        Serial.print(axis + 1);
+        Serial.print(" sine configured: amplitude=");
         Serial.print(amplitude);
         Serial.print(", frequency=");
         Serial.print(frequency);
@@ -470,7 +549,11 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     // ------------------------------------------------
 
     if (command == "status") {
-        printStatus();
+        if (firstToken == "1" || firstToken == "2") {
+            printStatusForAxis(axis);
+        } else {
+            printStatus();
+        }
         return;
     }
 

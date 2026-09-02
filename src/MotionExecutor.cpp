@@ -2,25 +2,30 @@
 #include <Arduino.h>
 #include <cstdlib>   // std::abs
 
-void MotionExecutor::start(const std::vector<int>& stepTrajectory, double timeStep)
+void MotionExecutor::start(
+    const std::vector<int>& stepTrajectory,
+    double timeStep
+)
 {
-    trajectory = &stepTrajectory;
+    motorDriver.setMotionMode(MotorDriver::MotionMode::Trajectory);
+    motorDriver.stop();
+
+    trajectoryBuffer = stepTrajectory;
+    trajectory = &trajectoryBuffer;
 
     currentInterval = 0;
-    intervalDurationUs = static_cast<uint32_t>(timeStep * 1000000.0);
+    intervalDurationUs =
+        static_cast<uint32_t>(timeStep * 1000000.0);
 
-    intervalStart = micros();
-    nextIntervalTime = intervalStart;
-
+    nextIntervalTime = micros();
     stepsRemaining = 0;
     active = true;
-
 }
 
 void MotionExecutor::update()
 {
     // Jeśli nie ma aktywnej trajektorii, to nic nie robimy.
-    if (!active || trajectory == nullptr) {
+    if (!active || trajectory == nullptr || trajectoryBuffer.empty()) {
         return;
     }
 
@@ -30,8 +35,10 @@ void MotionExecutor::update()
     if (static_cast<int32_t>(currentTime - nextIntervalTime) >= 0) {
 
         if (currentInterval >= trajectory->size()) {
-        active = false;
-        return;
+            active = false;
+            trajectory = nullptr;
+            trajectoryBuffer.clear();
+            return;
         }
 
         int stepValue = (*trajectory)[currentInterval];
@@ -62,13 +69,17 @@ void MotionExecutor::update()
         currentInterval++;
     }
 
-    if (stepsRemaining > 0 &&static_cast<int32_t>(currentTime - nextStepTime) >= 0) {
-        
+    if (stepsRemaining > 0 && static_cast<int32_t>(currentTime - nextStepTime) >= 0) {
         nextStepTime += stepPeriodUs;
         stepsRemaining--;
 
         motorDriver.step();
     }
 
-
+    if (trajectory != nullptr && currentInterval >= trajectory->size() && stepsRemaining == 0) {
+        active = false;
+        trajectory = nullptr;
+        trajectoryBuffer.clear();
+        motorDriver.setMotionMode(MotorDriver::MotionMode::ConstantSpeed);
+    }
 }

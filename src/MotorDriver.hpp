@@ -5,6 +5,11 @@
 
 class MotorDriver {
 public:
+    enum class MotionMode {
+        ConstantSpeed,
+        Trajectory
+    };
+
     MotorDriver(
         int stepPin,
         int dirPin,
@@ -21,6 +26,8 @@ public:
 
     void setDirection(bool direction);
     void setSpeed(uint32_t stepsPerSecond);
+    void setMotionMode(MotionMode mode);
+    MotionMode getMotionMode() const;
 
     void run();
 
@@ -48,4 +55,5 @@ private:
     bool enabled;
     bool running;
     bool stepState;
+    MotionMode motionMode_ = MotionMode::ConstantSpeed;
 };

@@ -15,9 +15,7 @@ private:
 public:
     TrajectoryGenerator(int stepsPerRevolution);
 
-    void setCurrentId(size_t id) {
-        current_id = id;
-    }
+    void setCurrentId(size_t id);
     void sinusoidalTrajectory(double amplitude, double frequency, double duration, double timeStep);
 
     bool getCurrentPosition(double& point);
@@ -26,7 +24,7 @@ public:
 
     void convertToSteps(std::vector<int>& stepTrajectory);
 
-    
+
 };
 
 

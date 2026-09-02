@@ -72,13 +72,11 @@ TMC2209Stepper tmc2(
 // --------------------------------------------------
 
 MotionExecutor motion_executor1(
-    motor1,
-    0.01
+    motor1
 );
 
 MotionExecutor motion_executor2(
-    motor2,
-    0.01
+    motor2
 );
 
 TrajectoryGenerator trajectory_generator1(1600);
@@ -88,17 +86,14 @@ TrajectoryGenerator trajectory_generator2(1600);
 // Obiekt obsługi komend szeregowych
 // --------------------------------------------------
 
-SerialCommandHandler serialCommandHandler1(
+SerialCommandHandler serialCommandHandler(
     motor1,
-    tmc1,
-    &motion_executor1,
-    &trajectory_generator1
-);
-
-SerialCommandHandler serialCommandHandler2(
     motor2,
+    tmc1,
     tmc2,
+    &motion_executor1,
     &motion_executor2,
+    &trajectory_generator1,
     &trajectory_generator2
 );
 
@@ -176,8 +171,8 @@ Serial1.begin(
 
     Serial.println("Drivers configured");
 
-    serialCommandHandler1.printHelp();
-    serialCommandHandler1.printStatus();
+    serialCommandHandler.printHelp();
+    serialCommandHandler.printStatus();
 }
 
 // --------------------------------------------------
@@ -189,12 +184,16 @@ void loop() {
     motor1.run();
     motor2.run();
 
-    motion_executor1.update();
-    motion_executor2.update();
+    if (motion_executor1.hasActiveTrajectory()) {
+        motion_executor1.update();
+    }
+
+    if (motion_executor2.hasActiveTrajectory()) {
+        motion_executor2.update();
+    }
 
     // Odczyt jest nieblokujacy.
-    serialCommandHandler1.readSerialCommands();
-    serialCommandHandler2.readSerialCommands();
+    serialCommandHandler.readSerialCommands();
 
 
 }

@@ -11,10 +11,14 @@ class TrajectoryGenerator;
 class SerialCommandHandler {
 public:
     SerialCommandHandler(
-        MotorDriver& motor,
-        TMC2209Stepper& tmc,
-        MotionExecutor* motionExecutor = nullptr,
-        TrajectoryGenerator* trajectoryGenerator = nullptr
+        MotorDriver& motor1,
+        MotorDriver& motor2,
+        TMC2209Stepper& tmc1,
+        TMC2209Stepper& tmc2,
+        MotionExecutor* motionExecutor1 = nullptr,
+        MotionExecutor* motionExecutor2 = nullptr,
+        TrajectoryGenerator* trajectoryGenerator1 = nullptr,
+        TrajectoryGenerator* trajectoryGenerator2 = nullptr
     );
 
     void printHelp();
@@ -25,11 +29,18 @@ public:
     void readSerialCommands();
 
 private:
-    MotorDriver& motor_;
-    TMC2209Stepper& tmc_;
-    MotionExecutor* motionExecutor_;
-    TrajectoryGenerator* trajectoryGenerator_;
+    MotorDriver* motors_[2];
+    TMC2209Stepper* tmcs_[2];
+    MotionExecutor* motionExecutors_[2];
+    TrajectoryGenerator* trajectoryGenerators_[2];
     String serialCommand_;
+
+    int resolveAxis(const String& value) const;
+    MotorDriver& motorForAxis(int axis) const;
+    TMC2209Stepper& tmcForAxis(int axis) const;
+    MotionExecutor* motionExecutorForAxis(int axis) const;
+    TrajectoryGenerator* trajectoryGeneratorForAxis(int axis) const;
+    void printStatusForAxis(int axis);
 };
 
 #endif
