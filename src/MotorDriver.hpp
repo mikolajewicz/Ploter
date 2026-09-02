@@ -30,8 +30,6 @@ public:
     uint32_t getSpeed() const;
     bool getDirection() const;
 
-    void followTrajectory(const std::vector<int>& stepTrajectory, double timeStep);
-
     uint8_t getStepPin() const { return stepPin; }
     uint8_t getDirPin() const { return dirPin; }
 

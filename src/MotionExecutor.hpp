@@ -17,8 +17,6 @@ private:
     const std::vector<int>* trajectory = nullptr;
 
     MotorDriver& motorDriver;
-    uint8_t stepPin;
-    uint8_t dirPin;
 
     size_t currentInterval = 0;
 

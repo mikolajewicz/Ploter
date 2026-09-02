@@ -15,8 +15,6 @@ void MotionExecutor::start(const std::vector<int>& stepTrajectory, double timeSt
     stepsRemaining = 0;
     active = true;
 
-     stepPin = motorDriver.getStepPin();
-     dirPin = motorDriver.getDirPin();
 }
 
 void MotionExecutor::update()
@@ -61,14 +59,19 @@ void MotionExecutor::update()
         nextStepTime = currentTime + stepPeriodUs;
 
         nextIntervalTime = currentTime + intervalDurationUs;
+
+        if (currentInterval != 0) {
+            currentInterval++;
+        }
     }
 
-
-     if (stepsRemaining != 0 && currentTime >= nextStepTime) {
+    if (stepsRemaining != 0 && currentTime >= nextStepTime) {
         
         nextStepTime += stepPeriodUs;
         stepsRemaining--;
 
         motorDriver.step();
     }
+
+
 }
