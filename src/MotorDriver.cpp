@@ -18,6 +18,24 @@ MotorDriver::MotorDriver(
 {
 }
 
+void MotorDriver::setMotionMode(MotionMode mode) {
+    motionMode_ = mode;
+
+    if (mode == MotionMode::Trajectory) {
+        stop();
+        return;
+    }
+
+    if (mode == MotionMode::ConstantSpeed && enabled && speedStepsPerSecond > 0) {
+        previousToggleTime = micros();
+        running = true;
+    }
+}
+
+MotorDriver::MotionMode MotorDriver::getMotionMode() const {
+    return motionMode_;
+}
+
 void MotorDriver::begin() {
     pinMode(stepPin, OUTPUT);
     pinMode(dirPin, OUTPUT);
@@ -56,6 +74,10 @@ void MotorDriver::disable() {
 }
 
 void MotorDriver::start() {
+    if (motionMode_ != MotionMode::ConstantSpeed) {
+        return;
+    }
+
     if (!enabled || speedStepsPerSecond == 0) {
         return;
     }
@@ -71,15 +93,22 @@ void MotorDriver::stop() {
     digitalWrite(stepPin, LOW);
 }
 
-void MotorDriver::setDirection(bool newDirection) {
+void MotorDriver::setDirection(bool newDirection)
+{
+    if (direction == newDirection) {
+        return;
+    }
+
     bool wasRunning = running;
 
     stop();
 
     direction = newDirection;
-    digitalWrite(dirPin, direction ? HIGH : LOW);
+    digitalWrite(
+        dirPin,
+        direction ? HIGH : LOW
+    );
 
-    // Krótki czas ustalenia sygnału DIR przed kolejnym STEP.
     delayMicroseconds(5);
 
     if (wasRunning && enabled && speedStepsPerSecond > 0) {
@@ -112,6 +141,7 @@ void MotorDriver::setSpeed(uint32_t stepsPerSecond) {
 
 void MotorDriver::run() {
     if (
+        motionMode_ != MotionMode::ConstantSpeed ||
         !enabled ||
         !running ||
         halfPeriodMicroseconds == 0

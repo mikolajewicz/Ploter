@@ -26,13 +26,13 @@ constexpr int TMC2_RX_PIN = 21;
 constexpr int TMC2_TX_PIN = 22;
 
 // STEP / DIR / ENABLE
-constexpr int STEP1_PIN = 32;
-constexpr int DIR1_PIN = 33;
-constexpr int ENABLE1_PIN = 27;
+constexpr int STEP1_PIN = 25;
+constexpr int DIR1_PIN = 26;
+constexpr int ENABLE1_PIN = 18;
 
-constexpr int STEP2_PIN = 25;
-constexpr int DIR2_PIN = 26;
-constexpr int ENABLE2_PIN = 18;
+constexpr int STEP2_PIN = 32;
+constexpr int DIR2_PIN = 33;
+constexpr int ENABLE2_PIN = 27;
 
 // Początkowe ustawienia
 constexpr uint16_t INITIAL_RMS_CURRENT = 600;
@@ -72,33 +72,28 @@ TMC2209Stepper tmc2(
 // --------------------------------------------------
 
 MotionExecutor motion_executor1(
-    motor1,
-    0.01
+    motor1
 );
 
 MotionExecutor motion_executor2(
-    motor2,
-    0.01
+    motor2
 );
 
-TrajectoryGenerator trajectory_generator1(1600);
-TrajectoryGenerator trajectory_generator2(1600);
+TrajectoryGenerator trajectory_generator1(16 * 16 * 100);
+TrajectoryGenerator trajectory_generator2(16 * 16 * 100);
 
 // --------------------------------------------------
 // Obiekt obsługi komend szeregowych
 // --------------------------------------------------
 
-SerialCommandHandler serialCommandHandler1(
+SerialCommandHandler serialCommandHandler(
     motor1,
-    tmc1,
-    &motion_executor1,
-    &trajectory_generator1
-);
-
-SerialCommandHandler serialCommandHandler2(
     motor2,
+    tmc1,
     tmc2,
+    &motion_executor1,
     &motion_executor2,
+    &trajectory_generator1,
     &trajectory_generator2
 );
 
@@ -176,8 +171,8 @@ Serial1.begin(
 
     Serial.println("Drivers configured");
 
-    serialCommandHandler1.printHelp();
-    serialCommandHandler1.printStatus();
+    serialCommandHandler.printHelp();
+    serialCommandHandler.printStatus();
 }
 
 // --------------------------------------------------
@@ -189,12 +184,21 @@ void loop() {
     motor1.run();
     motor2.run();
 
-    motion_executor1.update();
-    motion_executor2.update();
+    if (motion_executor1.hasActiveTrajectory()) {
+        motion_executor1.update();
+    }
+
+    if (motion_executor2.hasActiveTrajectory()) {
+        motion_executor2.update();
+    }
 
     // Odczyt jest nieblokujacy.
-    serialCommandHandler1.readSerialCommands();
-    serialCommandHandler2.readSerialCommands();
+    serialCommandHandler.readSerialCommands();
 
 
 }
+
+
+//sine <amplitude> <frequency> [duration] <dt>
+//sine 360 0.1 60 0.1
+

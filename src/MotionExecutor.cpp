@@ -1,74 +1,191 @@
 #include "MotionExecutor.hpp"
 #include <Arduino.h>
 #include <cstdlib>   // std::abs
+#include "TrajectoryGenerator.hpp"
 
-void MotionExecutor::start(const std::vector<int>& stepTrajectory, double timeStep)
+void MotionExecutor::start(
+    std::vector<int> stepTrajectory,
+    double timeStep
+)
 {
-    trajectory = &stepTrajectory;
+    motorDriver.setMotionMode(MotorDriver::MotionMode::Trajectory);
+    motorDriver.stop();
+
+    // Take ownership of the provided trajectory by moving it into the buffer.
+    trajectoryBuffer = std::move(stepTrajectory);
+    trajectory = &trajectoryBuffer;
+
+    currentInterval = 0;
+    intervalDurationUs =
+        static_cast<uint32_t>(timeStep * 1000000.0);
+
+    nextIntervalTime = micros();
+    stepsRemaining = 0;
+    active = true;
+}
+
+void MotionExecutor::startFromGenerator(TrajectoryGenerator* generator, double timeStep, int stepsPerRevolution)
+{
+    motorDriver.setMotionMode(MotorDriver::MotionMode::Trajectory);
+    motorDriver.stop();
+
+    // Use position-based trajectory streamed from generator
+    positionTrajectory = generator;
+    usingPositionTrajectory = true;
+
+    positionStepsPerRevolution = stepsPerRevolution;
 
     currentInterval = 0;
     intervalDurationUs = static_cast<uint32_t>(timeStep * 1000000.0);
 
-    intervalStart = micros();
-    nextIntervalTime = intervalStart;
-
+    nextIntervalTime = micros();
     stepsRemaining = 0;
     active = true;
 
+    // Initialize position state by fetching the first position if possible.
+    haveLastPosition = false;
+    residuePos = 0.0;
 }
 
 void MotionExecutor::update()
 {
     // Jeśli nie ma aktywnej trajektorii, to nic nie robimy.
-    if (!active || trajectory == nullptr) {
+    if (!active) {
         return;
     }
 
     // Która godzina?
     uint32_t currentTime = micros();
 
-    if (static_cast<int32_t>(currentTime - nextIntervalTime) >= 0) {
-
-        if (currentInterval >= trajectory->size()) {
-        active = false;
-        return;
+    // --- Case A: step trajectory precomputed ---
+    if (!usingPositionTrajectory) {
+        if (trajectory == nullptr || trajectoryBuffer.empty()) {
+            active = false;
+            return;
         }
 
-        int stepValue = (*trajectory)[currentInterval];
-        nextIntervalTime += intervalDurationUs;
-        stepsRemaining = std::abs(stepValue);
+        if (static_cast<int32_t>(currentTime - nextIntervalTime) >= 0) {
 
-        if (stepValue > 0) {
-            motorDriver.setDirection(true);
-        } else if (stepValue < 0) {
-            motorDriver.setDirection(false);
-        } else {
-            // Jeśli stepValue == 0, to nie zmieniamy kierunku.
+            if (currentInterval >= trajectory->size()) {
+                active = false;
+                trajectory = nullptr;
+                trajectoryBuffer.clear();
+                return;
+            }
+
+            int stepValue = (*trajectory)[currentInterval];
+            nextIntervalTime += intervalDurationUs;
+            stepsRemaining = std::abs(stepValue);
+
+            if (stepValue > 0) {
+                motorDriver.setDirection(true);
+            } else if (stepValue < 0) {
+                motorDriver.setDirection(false);
+            }
+
+            if (stepsRemaining > 0) {
+                stepPeriodUs =
+                    intervalDurationUs /
+                    static_cast<uint32_t>(stepsRemaining);
+
+                motorDriver.step();
+                stepsRemaining--;
+
+                nextStepTime = currentTime + stepPeriodUs;
+            } else {
+                stepPeriodUs = 0;
+            }
+            currentInterval++;
         }
 
-        if (stepsRemaining > 0) {
-            stepPeriodUs =
-            intervalDurationUs /
-            static_cast<uint32_t>(stepsRemaining);
-
-            motorDriver.step();
+        if (stepsRemaining > 0 && static_cast<int32_t>(currentTime - nextStepTime) >= 0) {
+            nextStepTime += stepPeriodUs;
             stepsRemaining--;
 
-            nextStepTime = currentTime + stepPeriodUs;
-        } 
-        else {
-            stepPeriodUs = 0;
+            motorDriver.step();
         }
-        currentInterval++;
+
+        if (trajectory != nullptr && currentInterval >= trajectory->size() && stepsRemaining == 0) {
+            active = false;
+            trajectory = nullptr;
+            trajectoryBuffer.clear();
+            motorDriver.setMotionMode(MotorDriver::MotionMode::ConstantSpeed);
+        }
+
+        return;
     }
 
-    if (stepsRemaining > 0 &&static_cast<int32_t>(currentTime - nextStepTime) >= 0) {
-        
-        nextStepTime += stepPeriodUs;
-        stepsRemaining--;
+    // --- Case B: streaming position trajectory from generator ---
+    if (usingPositionTrajectory) {
+        if (positionTrajectory == nullptr) {
+            active = false;
+            return;
+        }
 
-        motorDriver.step();
+        if (static_cast<int32_t>(currentTime - nextIntervalTime) >= 0) {
+            // Need two successive positions to compute difference for this interval.
+            double nextPos = 0.0;
+
+            if (!haveLastPosition) {
+                if (!positionTrajectory->getNextPosition(lastPosition)) {
+                    // nothing to do
+                    active = false;
+                    positionTrajectory = nullptr;
+                    usingPositionTrajectory = false;
+                    motorDriver.setMotionMode(MotorDriver::MotionMode::ConstantSpeed);
+                    return;
+                }
+                haveLastPosition = true;
+            }
+
+            if (!positionTrajectory->getNextPosition(nextPos)) {
+                // no more points
+                active = false;
+                positionTrajectory = nullptr;
+                usingPositionTrajectory = false;
+                motorDriver.setMotionMode(MotorDriver::MotionMode::ConstantSpeed);
+                return;
+            }
+
+            // compute difference between subsequent positions
+            double diffAngle = nextPos - lastPosition;
+            lastPosition = nextPos;
+
+            nextIntervalTime += intervalDurationUs;
+
+            double diffrence = diffAngle / 360.0 * static_cast<double>(positionStepsPerRevolution) + residuePos;
+            int stepValue = static_cast<int>(diffrence);
+            residuePos = diffrence - stepValue;
+
+            stepsRemaining = std::abs(stepValue);
+
+            if (stepValue > 0) {
+                motorDriver.setDirection(true);
+            } else if (stepValue < 0) {
+                motorDriver.setDirection(false);
+            }
+
+            if (stepsRemaining > 0) {
+                stepPeriodUs = intervalDurationUs / static_cast<uint32_t>(stepsRemaining);
+
+                motorDriver.step();
+                stepsRemaining--;
+
+                nextStepTime = currentTime + stepPeriodUs;
+            } else {
+                stepPeriodUs = 0;
+            }
+
+            currentInterval++;
+        }
+
+        if (stepsRemaining > 0 && static_cast<int32_t>(currentTime - nextStepTime) >= 0) {
+            nextStepTime += stepPeriodUs;
+            stepsRemaining--;
+
+            motorDriver.step();
+        }
+
+        return;
     }
-
-
 }
