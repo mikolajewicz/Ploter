@@ -26,13 +26,13 @@ constexpr int TMC2_RX_PIN = 21;
 constexpr int TMC2_TX_PIN = 22;
 
 // STEP / DIR / ENABLE
-constexpr int STEP1_PIN = 32;
-constexpr int DIR1_PIN = 33;
-constexpr int ENABLE1_PIN = 27;
+constexpr int STEP1_PIN = 25;
+constexpr int DIR1_PIN = 26;
+constexpr int ENABLE1_PIN = 18;
 
-constexpr int STEP2_PIN = 25;
-constexpr int DIR2_PIN = 26;
-constexpr int ENABLE2_PIN = 18;
+constexpr int STEP2_PIN = 32;
+constexpr int DIR2_PIN = 33;
+constexpr int ENABLE2_PIN = 27;
 
 // Początkowe ustawienia
 constexpr uint16_t INITIAL_RMS_CURRENT = 600;
@@ -79,8 +79,8 @@ MotionExecutor motion_executor2(
     motor2
 );
 
-TrajectoryGenerator trajectory_generator1(1600);
-TrajectoryGenerator trajectory_generator2(1600);
+TrajectoryGenerator trajectory_generator1(16 * 16 * 100);
+TrajectoryGenerator trajectory_generator2(16 * 16 * 100);
 
 // --------------------------------------------------
 // Obiekt obsługi komend szeregowych
@@ -197,3 +197,8 @@ void loop() {
 
 
 }
+
+
+//sine <amplitude> <frequency> [duration] <dt>
+//sine 360 0.1 60 0.1
+

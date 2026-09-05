@@ -63,7 +63,7 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  [1|2] microsteps <wartosc>");
     Serial.println("  [1|2] mode stealth");
     Serial.println("  [1|2] mode spread");
-    Serial.println("  [1|2] sine <amplitude> <frequency> <dt>");
+    Serial.println("  [1|2] sine <amplitude> <frequency> [duration] <dt>");
     Serial.println("  [1|2] status");
     Serial.println("  help");
     Serial.println();
@@ -72,7 +72,7 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  1 speed 1000");
     Serial.println("  2 dir 0");
     Serial.println("  1 rms 700");
-    Serial.println("  2 sine 100 2 0.01");
+    Serial.println("  2 sine 100 2 0.01      (duration defaults to 1/frequency)");
     Serial.println();
 }
 
@@ -179,6 +179,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
 
     int axis = 0;
     String commandLine = line;
+    commandLine.trim();
 
     if (firstToken == "1" || firstToken == "2") {
         axis = resolveAxis(firstToken);
@@ -460,43 +461,64 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             return;
         }
 
-        String params[3];
-        String remainingArgs = argument;
-        remainingArgs.trim();
+        // Split arguments into tokens
+        std::vector<String> tokens;
+        String remaining = argument;
+        remaining.trim();
 
-        for (int i = 0; i < 3; ++i) {
-            int separator = remainingArgs.indexOf(' ');
+        while (remaining.length() > 0) {
+            int sep = remaining.indexOf(' ');
 
-            if (separator < 0) {
-                params[i] = remainingArgs;
-                remainingArgs = "";
-            } else {
-                params[i] = remainingArgs.substring(0, separator);
-                remainingArgs = remainingArgs.substring(separator + 1);
-                remainingArgs.trim();
+            if (sep < 0) {
+                tokens.push_back(remaining);
+                break;
             }
 
-            params[i].trim();
+            tokens.push_back(remaining.substring(0, sep));
+            remaining = remaining.substring(sep + 1);
+            remaining.trim();
+        }
 
-            if (params[i].length() == 0) {
-                Serial.println(
-                    "Uzycie: sine <amplitude> <frequency> <dt>"
-                );
-                return;
-            }
+        // Accept either 3 params (amplitude frequency dt) or 4 (amplitude frequency duration dt)
+        if (tokens.size() != 3 && tokens.size() != 4) {
+            Serial.println(
+                "Uzycie: sine <amplitude> <frequency> [duration] <dt>"
+            );
+            return;
         }
 
         double amplitude = 0.0;
         double frequency = 0.0;
+        double duration = 0.0;
         double timeStep = 0.0;
 
-        if (!parseDoubleArgument(params[0], amplitude) ||
-            !parseDoubleArgument(params[1], frequency) ||
-            !parseDoubleArgument(params[2], timeStep)) {
+        if (!parseDoubleArgument(tokens[0], amplitude) ||
+            !parseDoubleArgument(tokens[1], frequency)) {
             Serial.println(
-                "Uzycie: sine <amplitude> <frequency> <dt>"
+                "Uzycie: sine <amplitude> <frequency> [duration] <dt>"
             );
             return;
+        }
+
+        if (tokens.size() == 3) {
+            // amplitude frequency dt
+            if (!parseDoubleArgument(tokens[2], timeStep)) {
+                Serial.println(
+                    "Uzycie: sine <amplitude> <frequency> [duration] <dt>"
+                );
+                return;
+            }
+
+            duration = 1.0 / frequency;
+        } else {
+            // amplitude frequency duration dt
+            if (!parseDoubleArgument(tokens[2], duration) ||
+                !parseDoubleArgument(tokens[3], timeStep)) {
+                Serial.println(
+                    "Uzycie: sine <amplitude> <frequency> [duration] <dt>"
+                );
+                return;
+            }
         }
 
         if (amplitude < 0.0) {
@@ -509,13 +531,17 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             return;
         }
 
+        if (duration <= 0.0) {
+            Serial.println("Dlugosc trwania musi byc > 0");
+            return;
+        }
+
         if (timeStep <= 0.0) {
             Serial.println("Krok czasowy musi byc > 0");
             return;
         }
 
         std::vector<int> stepTrajectory;
-        const double duration = 1.0 / frequency;
 
         trajectoryGenerator->sinusoidalTrajectory(
             amplitude,
@@ -523,9 +549,9 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             duration,
             timeStep
         );
-        trajectoryGenerator->convertToSteps(stepTrajectory);
 
-        motionExecutor->start(stepTrajectory, timeStep);
+        // Stream positions directly into MotionExecutor to avoid heavy allocation/copy spikes.
+        motionExecutor->startFromGenerator(trajectoryGenerator, timeStep, trajectoryGenerator->getStepsPerRevolution());
 
         if (!motor.isEnabled()) {
             motor.enable();
@@ -537,7 +563,9 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         Serial.print(amplitude);
         Serial.print(", frequency=");
         Serial.print(frequency);
-        Serial.print("Hz, dt=");
+        Serial.print("Hz, duration=");
+        Serial.print(duration);
+        Serial.print("s, dt=");
         Serial.print(timeStep);
         Serial.println("s");
 

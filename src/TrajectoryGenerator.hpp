@@ -23,6 +23,7 @@ public:
     bool getNextPosition(double& point);
 
     void convertToSteps(std::vector<int>& stepTrajectory);
+    int getStepsPerRevolution() const { return stepsPerRevolution; }
 
 
 };

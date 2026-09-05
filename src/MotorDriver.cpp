@@ -93,15 +93,22 @@ void MotorDriver::stop() {
     digitalWrite(stepPin, LOW);
 }
 
-void MotorDriver::setDirection(bool newDirection) {
+void MotorDriver::setDirection(bool newDirection)
+{
+    if (direction == newDirection) {
+        return;
+    }
+
     bool wasRunning = running;
 
     stop();
 
     direction = newDirection;
-    digitalWrite(dirPin, direction ? HIGH : LOW);
+    digitalWrite(
+        dirPin,
+        direction ? HIGH : LOW
+    );
 
-    // Krótki czas ustalenia sygnału DIR przed kolejnym STEP.
     delayMicroseconds(5);
 
     if (wasRunning && enabled && speedStepsPerSecond > 0) {
