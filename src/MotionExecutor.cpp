@@ -4,7 +4,7 @@
 
 void MotionExecutor::start(const std::vector<int>& stepTrajectory, double timeStep)
 {
-    trajectory = &stepTrajectory;
+    trajectory = stepTrajectory;
 
     currentInterval = 0;
     intervalDurationUs = static_cast<uint32_t>(timeStep * 1000000.0);
@@ -20,7 +20,7 @@ void MotionExecutor::start(const std::vector<int>& stepTrajectory, double timeSt
 void MotionExecutor::update()
 {
     // Jeśli nie ma aktywnej trajektorii, to nic nie robimy.
-    if (!active || trajectory == nullptr) {
+    if (!active) {
         return;
     }
 
@@ -29,12 +29,12 @@ void MotionExecutor::update()
 
     if (static_cast<int32_t>(currentTime - nextIntervalTime) >= 0) {
 
-        if (currentInterval >= trajectory->size()) {
-        active = false;
-        return;
+        if (currentInterval >= trajectory.size()) {
+            active = false;
+            return;
         }
 
-        int stepValue = (*trajectory)[currentInterval];
+        int stepValue = trajectory[currentInterval];
         nextIntervalTime += intervalDurationUs;
         stepsRemaining = std::abs(stepValue);
 

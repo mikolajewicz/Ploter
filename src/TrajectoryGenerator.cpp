@@ -1,6 +1,6 @@
 #include "TrajectoryGenerator.hpp"
 
-TrajectoryGenerator::TrajectoryGenerator(int stepsPerRevolution)
+TrajectoryGenerator::TrajectoryGenerator(unsigned int stepsPerRevolution)
     : timeStep(0.0),
       current_id(0),
       stepsPerRevolution(stepsPerRevolution)

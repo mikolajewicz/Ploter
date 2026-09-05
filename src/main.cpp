@@ -10,6 +10,8 @@
 // Konfiguracja TMC2209
 // --------------------------------------------------
 
+constexpr unsigned int stepsPerRevolution = 4 * 16 * 400;
+
 constexpr float R_SENSE = 0.11f;
 constexpr uint8_t TMC1_ADDRESS = 0b00;
 constexpr uint8_t TMC2_ADDRESS = 0b00;
@@ -81,8 +83,8 @@ MotionExecutor motion_executor2(
     0.01
 );
 
-TrajectoryGenerator trajectory_generator1(1600);
-TrajectoryGenerator trajectory_generator2(1600);
+TrajectoryGenerator trajectory_generator1(stepsPerRevolution);
+TrajectoryGenerator trajectory_generator2(stepsPerRevolution);
 
 // --------------------------------------------------
 // Obiekt obsługi komend szeregowych
@@ -194,7 +196,8 @@ void loop() {
 
     // Odczyt jest nieblokujacy.
     serialCommandHandler1.readSerialCommands();
-    serialCommandHandler2.readSerialCommands();
 
 
 }
+
+// sine 90 0.1 60 0.01

@@ -382,11 +382,11 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             return;
         }
 
-        String params[3];
+        String params[4];
         String remaining = argument;
         remaining.trim();
 
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 4; ++i) {
             int separator = remaining.indexOf(' ');
 
             if (separator < 0) {
@@ -411,12 +411,14 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         double amplitude = 0.0;
         double frequency = 0.0;
         double timeStep = 0.0;
+        double duration = 0.0;
 
         if (!parseDoubleArgument(params[0], amplitude) ||
             !parseDoubleArgument(params[1], frequency) ||
-            !parseDoubleArgument(params[2], timeStep)) {
+            !parseDoubleArgument(params[2], duration) ||
+            !parseDoubleArgument(params[3], timeStep)) {
             Serial.println(
-                "Uzycie: sine <amplitude> <frequency> <dt>"
+                "Uzycie: sine <amplitude> <frequency> <duration> <dt>"
             );
             return;
         }
@@ -435,9 +437,13 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             Serial.println("Krok czasowy musi byc > 0");
             return;
         }
+        
+        if (duration <= 0.0) {
+            Serial.println("Czas trwania musi byc > 0");
+            return;
+        }
 
         std::vector<int> stepTrajectory;
-        const double duration = 1.0 / frequency;
 
         trajectoryGenerator_->sinusoidalTrajectory(
             amplitude,

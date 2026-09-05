@@ -20,7 +20,7 @@ public:
     }
 
 private:
-    const std::vector<int>* trajectory = nullptr;
+    std::vector<int> trajectory;
 
     MotorDriver& motorDriver;
 

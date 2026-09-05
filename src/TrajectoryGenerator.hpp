@@ -9,11 +9,11 @@ private:
     std::vector<double> trajectoryPoints;
     std::vector<int> stepTrajectory;
     double timeStep;
-    int stepsPerRevolution = 1600; // Liczba kroków na pełny obrót ramienia
+    unsigned int stepsPerRevolution = 1600; // Liczba kroków na pełny obrót ramienia
     size_t current_id = 0;
     
 public:
-    TrajectoryGenerator(int stepsPerRevolution);
+    TrajectoryGenerator(unsigned int stepsPerRevolution);
 
     void setCurrentId(size_t id) {
         current_id = id;
