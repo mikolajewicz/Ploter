@@ -34,10 +34,6 @@ bool TrajectoryGenerator::getNextPosition(double& point)
     return true;
 }
 
-void TrajectoryGenerator::setCurrentId(size_t id) {
-    current_id = id;
-}
-
 bool TrajectoryGenerator::getCurrentPosition(double& point) {
     if (current_id >= trajectoryPoints.size()) {
         return false;
