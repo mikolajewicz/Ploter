@@ -44,6 +44,11 @@ public:
     double duration,
     double timeStep
 );
+
+void stopAll();
+bool isStopped() const {
+    return stopped_;
+}
 private:
     MotorDriver* motors_[2];
     TMC2209Stepper* tmcs_[2];
@@ -53,6 +58,7 @@ private:
     uint8_t selectedMotor_ = 0;
 
     String serialCommand_;
+    bool stopped_ = false;
 };
 
 #endif

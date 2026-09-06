@@ -144,6 +144,17 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         return;
     }
 
+    
+
+    String globalCommand = line;
+    globalCommand.toLowerCase();
+
+    if (globalCommand == "stop") {
+        stopAll();
+        Serial.println("ALL STOPPED");
+        return;
+    }
+
     // ------------------------------------------------
     // wybor silnika
     // ------------------------------------------------
@@ -684,18 +695,24 @@ bool SerialCommandHandler::trapeze(
     double acceleration,
     double timeStep
 ) {
-    if (motor > 1) {
+    uint8_t motorIndex = motor;
+
+    if (motor == 1) {
+        motorIndex = 0;
+    } else if (motor == 2) {
+        motorIndex = 1;
+    } else if (motor != 0) {
         return false;
     }
 
     MotionExecutor* motionExecutor =
-        motionExecutors_[motor];
+        motionExecutors_[motorIndex];
 
     TrajectoryGenerator* trajectoryGenerator =
-        trajectoryGenerators_[motor];
+        trajectoryGenerators_[motorIndex];
 
     MotorDriver* motorDriver =
-        motors_[motor];
+        motors_[motorIndex];
 
     if (motionExecutor == nullptr ||
         trajectoryGenerator == nullptr) {
@@ -738,18 +755,24 @@ bool SerialCommandHandler::cosine(
     double duration,
     double timeStep
 ) {
-    if (motor > 1) {
+    uint8_t motorIndex = motor;
+
+    if (motor == 1) {
+        motorIndex = 0;
+    } else if (motor == 2) {
+        motorIndex = 1;
+    } else if (motor != 0) {
         return false;
     }
 
     MotionExecutor* motionExecutor =
-        motionExecutors_[motor];
+        motionExecutors_[motorIndex];
 
     TrajectoryGenerator* trajectoryGenerator =
-        trajectoryGenerators_[motor];
+        trajectoryGenerators_[motorIndex];
 
     MotorDriver* motorDriver =
-        motors_[motor];
+        motors_[motorIndex];
 
     if (motionExecutor == nullptr ||
         trajectoryGenerator == nullptr) {
@@ -781,4 +804,15 @@ bool SerialCommandHandler::cosine(
     }
 
     return true;
+}
+
+void SerialCommandHandler::stopAll()
+{
+    motionExecutors_[0]->stop();
+    motionExecutors_[1]->stop();
+
+    motors_[0]->stop();
+    motors_[1]->stop();
+
+    stopped_ = true;
 }

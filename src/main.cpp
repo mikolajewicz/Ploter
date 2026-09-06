@@ -21,20 +21,20 @@ constexpr uint32_t TMC1_BAUD_RATE = 115200;
 constexpr uint32_t TMC2_BAUD_RATE = 115200;
 
 // UART ESP32 -> TMC2209
-constexpr int TMC1_RX_PIN = 21;
-constexpr int TMC1_TX_PIN = 22;
+constexpr int TMC1_RX_PIN = 16;
+constexpr int TMC1_TX_PIN = 17;
 
-constexpr int TMC2_RX_PIN = 16;
-constexpr int TMC2_TX_PIN = 17;
+constexpr int TMC2_RX_PIN = 21;
+constexpr int TMC2_TX_PIN = 22;
 
 // STEP / DIR / ENABLE
-constexpr int STEP1_PIN = 25;
-constexpr int DIR1_PIN = 26;
-constexpr int ENABLE1_PIN = 18;
+constexpr int STEP1_PIN = 32;
+constexpr int DIR1_PIN = 33;
+constexpr int ENABLE1_PIN = 27;
 
-constexpr int STEP2_PIN = 32;
-constexpr int DIR2_PIN = 33;
-constexpr int ENABLE2_PIN = 27;
+constexpr int STEP2_PIN = 25;
+constexpr int DIR2_PIN = 26;
+constexpr int ENABLE2_PIN = 18;
 
 // Początkowe ustawienia
 constexpr uint16_t INITIAL_RMS_CURRENT = 600;
@@ -180,6 +180,10 @@ Serial1.begin(
 
     serialCommandHandler.printHelp();
     serialCommandHandler.printStatus();
+
+    serialCommandHandler.cosine(
+                1, 90, 0.1, 60, 0.01
+    );
 }
 
 // --------------------------------------------------
@@ -195,53 +199,49 @@ void loop() {
 
     serialCommandHandler.readSerialCommands();
 
-    // if (sequenceState == 0 &&
-    //     !motion_executor2.isActive()) {
+    if (!motion_executor1.isActive()) {
+        serialCommandHandler.cosine(
+                1, 90, 0.1, 10, 0.01
+    )   ;
+    }
 
-    //     serialCommandHandler.cosine(
-    //         1,
-    //         90,
-    //         0.5,
-    //         2.0,
-    //         0.01
-    //     );
+    if (!serialCommandHandler.isStopped()) {
 
-    //     sequenceState = 1;
-    // }
+        if (sequenceState == 0 &&
+            !motion_executor2.isActive()) {
 
-    // if (sequenceState == 1 &&
-    //     !motion_executor2.isActive()) {
+            serialCommandHandler.cosine(
+                2, 90, 0.1, 10, 0.01
+            );
 
-    //     serialCommandHandler.trapeze(
-    //         1,
-    //         180,
-    //         1,
-    //         0.5,
-    //         0.01
-    //     );
+            sequenceState = 1;
+        }
+        else if (sequenceState == 1 &&
+                 !motion_executor2.isActive()) {
 
-    //     sequenceState = 2;
-    // }
+            serialCommandHandler.trapeze(
+                2, 90, 3, 1.0, 0.01
+            );
 
-    // if (sequenceState == 2 &&
-    //     !motion_executor2.isActive()) {
+            sequenceState = 2;
+        }
+        else if (sequenceState == 2 &&
+                 !motion_executor2.isActive()) {
 
-    //     serialCommandHandler.trapeze(
-    //         1,
-    //         -180,
-    //         1,
-    //         0.5,
-    //         0.01
-    //     );
+            serialCommandHandler.trapeze(
+                2, -90, 3, 1.0, 0.01
+            );
 
-    //     sequenceState = 3;
-    // }
+            sequenceState = 3;
+        }
+        else if (sequenceState == 3 &&
+                 !motion_executor2.isActive()) {
 
-    // if (sequenceState == 3 &&
-    //     !motion_executor2.isActive()) {
-    //     sequenceState = 0;
-    // }
+            sequenceState = 0;
+        }
+    }
 }
 
 // m2 sine 90 0.1 60 0.01
 // m2 trapeze 720 3 1.5 0.005
+// m2 rms 20

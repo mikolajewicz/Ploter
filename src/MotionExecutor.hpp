@@ -22,7 +22,14 @@ public:
     bool isActive() const {
         return active;
     }
-    
+
+    void stop()
+    {
+        active = false;
+        stepsRemaining = 0;
+        trajectory.clear();
+    }
+
 private:
     std::vector<int> trajectory;
 
