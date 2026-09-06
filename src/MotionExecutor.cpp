@@ -39,9 +39,9 @@ void MotionExecutor::update()
         stepsRemaining = std::abs(stepValue);
 
         if (stepValue > 0) {
-            motorDriver.setDirection(true);
-        } else if (stepValue < 0) {
             motorDriver.setDirection(false);
+        } else if (stepValue < 0) {
+            motorDriver.setDirection(true);
         } else {
             // Jeśli stepValue == 0, to nie zmieniamy kierunku.
         }

@@ -201,3 +201,6 @@ void loop() {
 }
 
 // sine 90 0.1 60 0.01
+// trapeze 360 5 100 0.01
+// trapeze 360 1 1500 0.01
+// trapeze 90 1 400 0.01
