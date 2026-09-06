@@ -31,7 +31,8 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  microsteps <wartosc>");
     Serial.println("  mode stealth");
     Serial.println("  mode spread");
-    Serial.println("  sine <amplitude> <frequency> <dt>");
+    Serial.println("  sine <amplitude> <frequency> <duration> <dt>");
+    Serial.println("  trapeze <distance> <time> <acceleration> <dt>");
     Serial.println("  status");
     Serial.println("  help");
     Serial.println();
@@ -41,7 +42,8 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  dir 0");
     Serial.println("  rms 700");
     Serial.println("  microsteps 16");
-    Serial.println("  sine 100 2 0.01");
+    Serial.println("  sine 100 2 10 0.01");
+    Serial.println("  trapeze 180 1 90 0.01");
     Serial.println();
 }
 
@@ -371,6 +373,107 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     }
 
     // ------------------------------------------------
+    // trapeze
+    // ------------------------------------------------
+
+    if (command == "trapeze") {
+        if (motionExecutor_ == nullptr || trajectoryGenerator_ == nullptr) {
+            Serial.println(
+                "Komenda trapeze jest niezainicjalizowana."
+            );
+            return;
+        }
+
+        String params[4];
+        String remaining = argument;
+        remaining.trim();
+
+        for (int i = 0; i < 4; ++i) {
+            int separator = remaining.indexOf(' ');
+
+            if (separator < 0) {
+                params[i] = remaining;
+                remaining = "";
+            } else {
+                params[i] = remaining.substring(0, separator);
+                remaining = remaining.substring(separator + 1);
+                remaining.trim();
+            }
+
+            params[i].trim();
+
+            if (params[i].length() == 0) {
+                Serial.println(
+                    "Uzycie: trapeze <distance> <time> <acceleration> <dt>"
+                );
+                return;
+            }
+        }
+
+        double distance = 0.0;
+        double totalTime = 0.0;
+        double acceleration = 0.0;
+        double timeStep = 0.0;
+
+        if (!parseDoubleArgument(params[0], distance) ||
+            !parseDoubleArgument(params[1], totalTime) ||
+            !parseDoubleArgument(params[2], acceleration) ||
+            !parseDoubleArgument(params[3], timeStep)) {
+            Serial.println(
+                "Uzycie: trapeze <distance> <time> <acceleration> <dt>"
+            );
+            return;
+        }
+
+        if (totalTime <= 0.0) {
+            Serial.println("Czas trwania musi byc > 0");
+            return;
+        }
+
+        if (acceleration <= 0.0) {
+            Serial.println("Przyspieszenie musi byc > 0");
+            return;
+        }
+
+        if (timeStep <= 0.0) {
+            Serial.println("Krok czasowy musi byc > 0");
+            return;
+        }
+
+        std::vector<int> stepTrajectory;
+
+        if (!trajectoryGenerator_->trapezoidalProfile(
+                distance,
+                totalTime,
+                acceleration,
+                timeStep
+            )) {
+            Serial.println("Nie udalo sie wygenerowac profilu trapezoidalnego");
+            return;
+        }
+
+        trajectoryGenerator_->convertToSteps(stepTrajectory);
+        motionExecutor_->setTimeStep(timeStep);
+        motionExecutor_->start(stepTrajectory, timeStep);
+
+        if (!motor_.isEnabled()) {
+            motor_.enable();
+        }
+
+        Serial.print("Trapeze configured: distance=");
+        Serial.print(distance);
+        Serial.print(", time=");
+        Serial.print(totalTime);
+        Serial.print("s, acceleration=");
+        Serial.print(acceleration);
+        Serial.print(", dt=");
+        Serial.print(timeStep);
+        Serial.println("s");
+
+        return;
+    }
+
+    // ------------------------------------------------
     // sine
     // ------------------------------------------------
 
@@ -437,7 +540,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             Serial.println("Krok czasowy musi byc > 0");
             return;
         }
-        
+
         if (duration <= 0.0) {
             Serial.println("Czas trwania musi byc > 0");
             return;
