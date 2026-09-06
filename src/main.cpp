@@ -41,6 +41,8 @@ constexpr uint16_t INITIAL_RMS_CURRENT = 600;
 constexpr uint16_t INITIAL_MICROSTEPS = 16;
 constexpr uint32_t INITIAL_SPEED = 0;
 
+int sequenceState = 0;
+
 // --------------------------------------------------
 // Obiekty
 // --------------------------------------------------
@@ -185,19 +187,61 @@ Serial1.begin(
 // --------------------------------------------------
 
 void loop() {
-    // Ta metoda musi wykonywac sie bardzo czesto.
     motor1.run();
     motor2.run();
 
     motion_executor1.update();
     motion_executor2.update();
 
-    // Odczyt jest nieblokujacy.
     serialCommandHandler.readSerialCommands();
 
+    // if (sequenceState == 0 &&
+    //     !motion_executor2.isActive()) {
+
+    //     serialCommandHandler.cosine(
+    //         1,
+    //         90,
+    //         0.5,
+    //         2.0,
+    //         0.01
+    //     );
+
+    //     sequenceState = 1;
+    // }
+
+    // if (sequenceState == 1 &&
+    //     !motion_executor2.isActive()) {
+
+    //     serialCommandHandler.trapeze(
+    //         1,
+    //         180,
+    //         1,
+    //         0.5,
+    //         0.01
+    //     );
+
+    //     sequenceState = 2;
+    // }
+
+    // if (sequenceState == 2 &&
+    //     !motion_executor2.isActive()) {
+
+    //     serialCommandHandler.trapeze(
+    //         1,
+    //         -180,
+    //         1,
+    //         0.5,
+    //         0.01
+    //     );
+
+    //     sequenceState = 3;
+    // }
+
+    // if (sequenceState == 3 &&
+    //     !motion_executor2.isActive()) {
+    //     sequenceState = 0;
+    // }
 }
 
-// sine 90 0.1 60 0.01
-// trapeze 360 5 100 0.01
-// trapeze 360 1 1500 0.01
-// m2 trapeze 90 1 400 0.01
+// m2 sine 90 0.1 60 0.01
+// m2 trapeze 720 3 1.5 0.005

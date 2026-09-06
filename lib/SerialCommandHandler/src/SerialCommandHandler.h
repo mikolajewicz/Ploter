@@ -37,7 +37,7 @@ public:
     double timeStep
 );
 
-    bool sine(
+    bool cosine(
     uint8_t motor,
     double amplitude,
     double frequency,

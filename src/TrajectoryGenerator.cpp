@@ -21,10 +21,6 @@ bool TrajectoryGenerator::trapezoidalProfile(
         return false;
     }
 
-    double acceleration =
-    distance /
-    (accelerationTime * (time - accelerationTime));
-
     double sign = 1.0;
 
     if (distance < 0.0) {
@@ -37,52 +33,66 @@ bool TrajectoryGenerator::trapezoidalProfile(
     size_t samples =
         static_cast<size_t>(time / timeStep);
 
-    double t_const_squared =
-        time * time - (4.0 * distance / acceleration);
+    double t_accel = accelerationTime;
 
-    if (t_const_squared < 0.0) {
-        return false;
-    }
+    double t_const =
+        time - 2.0 * accelerationTime;
 
-    double t_const = std::sqrt(t_const_squared);
-    double t_accel = 0.5 * (time - t_const);
-    double v_max = t_accel * acceleration;
+    double acceleration =
+        distance /
+        (accelerationTime * (time - accelerationTime));
+
+    double v_max =
+        acceleration * accelerationTime;
 
     for (size_t i = 0; i <= samples; ++i) {
         double t = i * timeStep;
 
         if (t <= t_accel) {
+
             trajectoryPoints.push_back(
-                sign * 0.5 * acceleration * std::pow(t, 2)
+                sign *
+                0.5 *
+                acceleration *
+                t * t
             );
         }
         else if (t <= t_accel + t_const) {
+
             trajectoryPoints.push_back(
                 sign * (
                     v_max * (t - t_accel) +
-                    0.5 * acceleration * std::pow(t_accel, 2)
+                    0.5 *
+                    acceleration *
+                    t_accel *
+                    t_accel
                 )
             );
         }
         else {
+
             trajectoryPoints.push_back(
                 sign * (
                     distance -
-                    0.5 * acceleration *
-                    std::pow(time - t, 2)
+                    0.5 *
+                    acceleration *
+                    (time - t) *
+                    (time - t)
                 )
             );
         }
     }
 
     if (samples * timeStep < time) {
-        trajectoryPoints.push_back(sign * distance);
+        trajectoryPoints.push_back(
+            sign * distance
+        );
     }
 
     return true;
 }
 
-void TrajectoryGenerator::sinusoidalTrajectory(double amplitude, double frequency, double duration, double timeStep)
+void TrajectoryGenerator::cosinusoidalTrajectory(double amplitude, double frequency, double duration, double timeStep)
 {
     this->timeStep = timeStep;
     
@@ -92,7 +102,7 @@ void TrajectoryGenerator::sinusoidalTrajectory(double amplitude, double frequenc
 
     for (size_t i = 0; i <= samples; ++i) {
         double t = i * timeStep;
-        double q = amplitude * sin(2.0 * M_PI * frequency * t);
+        double q = amplitude * cos(2.0 * M_PI * frequency * t);
 
         trajectoryPoints.push_back(q);
     }

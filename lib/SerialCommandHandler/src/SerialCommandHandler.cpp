@@ -36,8 +36,8 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  microsteps <wartosc>");
     Serial.println("  mode stealth");
     Serial.println("  mode spread");
-    Serial.println("  sine <amplitude> <frequency> <duration> <dt>");
-    Serial.println("  trapeze <distance> <time> <acceleration> <dt>");
+    Serial.println("  cosine <amplitude> <frequency> <duration> <dt>");
+    Serial.println("  <motor> trapeze <distance> <time> <accelTime> <dt>");
     Serial.println("  status");
     Serial.println("  help");
     Serial.println();
@@ -47,8 +47,8 @@ void SerialCommandHandler::printHelp() {
     Serial.println("  dir 0");
     Serial.println("  rms 700");
     Serial.println("  microsteps 16");
-    Serial.println("  sine 100 2 10 0.01");
-    Serial.println("  trapeze 180 1 90 0.01");
+    Serial.println("  cosine 100 2 10 0.01");
+    Serial.println("  m2 trapeze -75 2 0.5 0.01");
     Serial.println();
 }
 
@@ -601,7 +601,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             return;
         }
 
-        if (!sine(
+        if (!cosine(
             selectedMotor_,
             amplitude,
             frequency,
@@ -731,7 +731,7 @@ bool SerialCommandHandler::trapeze(
     return true;
 }
 
-bool SerialCommandHandler::sine(
+bool SerialCommandHandler::cosine(
     uint8_t motor,
     double amplitude,
     double frequency,
@@ -765,7 +765,7 @@ bool SerialCommandHandler::sine(
 
     std::vector<int> stepTrajectory;
 
-    trajectoryGenerator->sinusoidalTrajectory(
+    trajectoryGenerator->cosinusoidalTrajectory(
         amplitude,
         frequency,
         duration,

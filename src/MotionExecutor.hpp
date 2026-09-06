@@ -19,6 +19,10 @@ public:
         intervalDurationUs = static_cast<uint32_t>(timeStep * 1000000.0);
     }
 
+    bool isActive() const {
+        return active;
+    }
+    
 private:
     std::vector<int> trajectory;
 
