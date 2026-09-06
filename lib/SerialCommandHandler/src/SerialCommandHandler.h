@@ -11,11 +11,16 @@ class TrajectoryGenerator;
 class SerialCommandHandler {
 public:
     SerialCommandHandler(
-        MotorDriver& motor,
-        TMC2209Stepper& tmc,
-        MotionExecutor* motionExecutor = nullptr,
-        TrajectoryGenerator* trajectoryGenerator = nullptr
-    );
+    MotorDriver& motor1,
+    TMC2209Stepper& tmc1,
+    MotionExecutor& motionExecutor1,
+    TrajectoryGenerator& trajectoryGenerator1,
+
+    MotorDriver& motor2,
+    TMC2209Stepper& tmc2,
+    MotionExecutor& motionExecutor2,
+    TrajectoryGenerator& trajectoryGenerator2
+);
 
     void printHelp();
     void printStatus();
@@ -24,11 +29,21 @@ public:
     void handleSerialCommand(String line);
     void readSerialCommands();
 
+    bool trapeze(
+    uint8_t motor,
+    double distance,
+    double time,
+    double acceleration,
+    double timeStep
+);
 private:
-    MotorDriver& motor_;
-    TMC2209Stepper& tmc_;
-    MotionExecutor* motionExecutor_;
-    TrajectoryGenerator* trajectoryGenerator_;
+    MotorDriver* motors_[2];
+    TMC2209Stepper* tmcs_[2];
+    MotionExecutor* motionExecutors_[2];
+    TrajectoryGenerator* trajectoryGenerators_[2];
+
+    uint8_t selectedMotor_ = 0;
+
     String serialCommand_;
 };
 

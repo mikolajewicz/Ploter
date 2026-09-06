@@ -21,20 +21,20 @@ constexpr uint32_t TMC1_BAUD_RATE = 115200;
 constexpr uint32_t TMC2_BAUD_RATE = 115200;
 
 // UART ESP32 -> TMC2209
-constexpr int TMC1_RX_PIN = 16;
-constexpr int TMC1_TX_PIN = 17;
+constexpr int TMC1_RX_PIN = 21;
+constexpr int TMC1_TX_PIN = 22;
 
-constexpr int TMC2_RX_PIN = 21;
-constexpr int TMC2_TX_PIN = 22;
+constexpr int TMC2_RX_PIN = 16;
+constexpr int TMC2_TX_PIN = 17;
 
 // STEP / DIR / ENABLE
-constexpr int STEP1_PIN = 32;
-constexpr int DIR1_PIN = 33;
-constexpr int ENABLE1_PIN = 27;
+constexpr int STEP1_PIN = 25;
+constexpr int DIR1_PIN = 26;
+constexpr int ENABLE1_PIN = 18;
 
-constexpr int STEP2_PIN = 25;
-constexpr int DIR2_PIN = 26;
-constexpr int ENABLE2_PIN = 18;
+constexpr int STEP2_PIN = 32;
+constexpr int DIR2_PIN = 33;
+constexpr int ENABLE2_PIN = 27;
 
 // Początkowe ustawienia
 constexpr uint16_t INITIAL_RMS_CURRENT = 600;
@@ -90,18 +90,16 @@ TrajectoryGenerator trajectory_generator2(stepsPerRevolution);
 // Obiekt obsługi komend szeregowych
 // --------------------------------------------------
 
-SerialCommandHandler serialCommandHandler1(
+SerialCommandHandler serialCommandHandler(
     motor1,
     tmc1,
-    &motion_executor1,
-    &trajectory_generator1
-);
+    motion_executor1,
+    trajectory_generator1,
 
-SerialCommandHandler serialCommandHandler2(
     motor2,
     tmc2,
-    &motion_executor2,
-    &trajectory_generator2
+    motion_executor2,
+    trajectory_generator2
 );
 
 // --------------------------------------------------
@@ -178,8 +176,8 @@ Serial1.begin(
 
     Serial.println("Drivers configured");
 
-    serialCommandHandler1.printHelp();
-    serialCommandHandler1.printStatus();
+    serialCommandHandler.printHelp();
+    serialCommandHandler.printStatus();
 }
 
 // --------------------------------------------------
@@ -195,12 +193,11 @@ void loop() {
     motion_executor2.update();
 
     // Odczyt jest nieblokujacy.
-    serialCommandHandler1.readSerialCommands();
-
+    serialCommandHandler.readSerialCommands();
 
 }
 
 // sine 90 0.1 60 0.01
 // trapeze 360 5 100 0.01
 // trapeze 360 1 1500 0.01
-// trapeze 90 1 400 0.01
+// m2 trapeze 90 1 400 0.01

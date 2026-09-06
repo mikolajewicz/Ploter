@@ -6,15 +6,20 @@
 #include "TrajectoryGenerator.hpp"
 
 SerialCommandHandler::SerialCommandHandler(
-    MotorDriver& motor,
-    TMC2209Stepper& tmc,
-    MotionExecutor* motionExecutor,
-    TrajectoryGenerator* trajectoryGenerator
+    MotorDriver& motor1,
+    TMC2209Stepper& tmc1,
+    MotionExecutor& motionExecutor1,
+    TrajectoryGenerator& trajectoryGenerator1,
+
+    MotorDriver& motor2,
+    TMC2209Stepper& tmc2,
+    MotionExecutor& motionExecutor2,
+    TrajectoryGenerator& trajectoryGenerator2
 )
-    : motor_(motor),
-      tmc_(tmc),
-      motionExecutor_(motionExecutor),
-      trajectoryGenerator_(trajectoryGenerator) {
+    : motors_{&motor1, &motor2},
+      tmcs_{&tmc1, &tmc2},
+      motionExecutors_{&motionExecutor1, &motionExecutor2},
+      trajectoryGenerators_{&trajectoryGenerator1, &trajectoryGenerator2} {
 }
 
 void SerialCommandHandler::printHelp() {
@@ -48,6 +53,12 @@ void SerialCommandHandler::printHelp() {
 }
 
 void SerialCommandHandler::printStatus() {
+    MotorDriver& motor_ =
+        *motors_[selectedMotor_];
+
+    TMC2209Stepper& tmc_ =
+        *tmcs_[selectedMotor_];
+
     Serial.println();
     Serial.println("----- STATUS -----");
 
@@ -132,6 +143,62 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     if (line.length() == 0) {
         return;
     }
+
+    // ------------------------------------------------
+    // wybor silnika
+    // ------------------------------------------------
+
+    int motorSeparator = line.indexOf(' ');
+
+    if (motorSeparator < 0) {
+        Serial.println(
+            "Uzycie: m1 <komenda> lub m2 <komenda>"
+        );
+        return;
+    }
+
+    String motorName =
+        line.substring(0, motorSeparator);
+
+    motorName.toLowerCase();
+
+    if (motorName == "m1") {
+        selectedMotor_ = 0;
+    }
+    else if (motorName == "m2") {
+        selectedMotor_ = 1;
+    }
+    else {
+        Serial.println(
+            "Nieznany silnik. Uzyj m1 lub m2"
+        );
+        return;
+    }
+
+    line = line.substring(motorSeparator + 1);
+    line.trim();
+
+    if (line.length() == 0) {
+        return;
+    }
+
+    // Te nazwy sa takie same jak poprzednie pola klasy,
+    // wiec dalsza czesc handlera nie wymaga zmian.
+    MotorDriver& motor_ =
+        *motors_[selectedMotor_];
+
+    TMC2209Stepper& tmc_ =
+        *tmcs_[selectedMotor_];
+
+    MotionExecutor* motionExecutor_ =
+        motionExecutors_[selectedMotor_];
+
+    TrajectoryGenerator* trajectoryGenerator_ =
+        trajectoryGenerators_[selectedMotor_];
+
+    // ------------------------------------------------
+    // parsowanie komendy
+    // ------------------------------------------------
 
     int separatorPosition = line.indexOf(' ');
 
@@ -622,4 +689,58 @@ void SerialCommandHandler::readSerialCommands() {
             );
         }
     }
+}
+
+bool SerialCommandHandler::trapeze(
+    uint8_t motor,
+    double distance,
+    double time,
+    double acceleration,
+    double timeStep
+) {
+    if (motor > 1) {
+        return false;
+    }
+
+    MotionExecutor* motionExecutor =
+        motionExecutors_[motor];
+
+    TrajectoryGenerator* trajectoryGenerator =
+        trajectoryGenerators_[motor];
+
+    MotorDriver* motorDriver =
+        motors_[motor];
+
+    if (motionExecutor == nullptr ||
+        trajectoryGenerator == nullptr) {
+        return false;
+    }
+
+    if (time <= 0.0 ||
+        acceleration <= 0.0 ||
+        timeStep <= 0.0) {
+        return false;
+    }
+
+    std::vector<int> stepTrajectory;
+
+    if (!trajectoryGenerator->trapezoidalProfile(
+            distance,
+            time,
+            acceleration,
+            timeStep
+        )) {
+        return false;
+    }
+
+    trajectoryGenerator->convertToSteps(stepTrajectory);
+
+    motionExecutor->setTimeStep(timeStep);
+    motionExecutor->start(stepTrajectory, timeStep);
+
+    if (!motorDriver->isEnabled()) {
+        motorDriver->enable();
+    }
+
+    return true;
 }
