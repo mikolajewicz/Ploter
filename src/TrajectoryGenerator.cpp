@@ -11,12 +11,19 @@ TrajectoryGenerator::TrajectoryGenerator(unsigned int stepsPerRevolution)
 bool TrajectoryGenerator::trapezoidalProfile(
     double distance,
     double time,
-    double acceleration,
+    double accelerationTime,
     double timeStep
 ) {
-    if (time <= 0.0 || acceleration <= 0.0 || timeStep <= 0.0) {
+    if (time <= 0.0 ||
+        accelerationTime <= 0.0 ||
+        accelerationTime > time / 2.0 ||
+        timeStep <= 0.0) {
         return false;
     }
+
+    double acceleration =
+    distance /
+    (accelerationTime * (time - accelerationTime));
 
     double sign = 1.0;
 

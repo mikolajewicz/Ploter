@@ -444,101 +444,89 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     // ------------------------------------------------
 
     if (command == "trapeze") {
-        if (motionExecutor_ == nullptr || trajectoryGenerator_ == nullptr) {
-            Serial.println(
-                "Komenda trapeze jest niezainicjalizowana."
-            );
-            return;
+    String params[4];
+    String remaining = argument;
+    remaining.trim();
+
+    for (int i = 0; i < 4; ++i) {
+        int separator = remaining.indexOf(' ');
+
+        if (separator < 0) {
+            params[i] = remaining;
+            remaining = "";
+        } else {
+            params[i] = remaining.substring(0, separator);
+            remaining = remaining.substring(separator + 1);
+            remaining.trim();
         }
 
-        String params[4];
-        String remaining = argument;
-        remaining.trim();
+        params[i].trim();
 
-        for (int i = 0; i < 4; ++i) {
-            int separator = remaining.indexOf(' ');
-
-            if (separator < 0) {
-                params[i] = remaining;
-                remaining = "";
-            } else {
-                params[i] = remaining.substring(0, separator);
-                remaining = remaining.substring(separator + 1);
-                remaining.trim();
-            }
-
-            params[i].trim();
-
-            if (params[i].length() == 0) {
-                Serial.println(
-                    "Uzycie: trapeze <distance> <time> <acceleration> <dt>"
-                );
-                return;
-            }
-        }
-
-        double distance = 0.0;
-        double totalTime = 0.0;
-        double acceleration = 0.0;
-        double timeStep = 0.0;
-
-        if (!parseDoubleArgument(params[0], distance) ||
-            !parseDoubleArgument(params[1], totalTime) ||
-            !parseDoubleArgument(params[2], acceleration) ||
-            !parseDoubleArgument(params[3], timeStep)) {
+        if (params[i].length() == 0) {
             Serial.println(
                 "Uzycie: trapeze <distance> <time> <acceleration> <dt>"
             );
             return;
         }
+    }
 
-        if (totalTime <= 0.0) {
-            Serial.println("Czas trwania musi byc > 0");
-            return;
-        }
+    double distance = 0.0;
+    double totalTime = 0.0;
+    double acceleration = 0.0;
+    double timeStep = 0.0;
 
-        if (acceleration <= 0.0) {
-            Serial.println("Przyspieszenie musi byc > 0");
-            return;
-        }
+    if (!parseDoubleArgument(params[0], distance) ||
+        !parseDoubleArgument(params[1], totalTime) ||
+        !parseDoubleArgument(params[2], acceleration) ||
+        !parseDoubleArgument(params[3], timeStep)) {
 
-        if (timeStep <= 0.0) {
-            Serial.println("Krok czasowy musi byc > 0");
-            return;
-        }
-
-        std::vector<int> stepTrajectory;
-
-        if (!trajectoryGenerator_->trapezoidalProfile(
-                distance,
-                totalTime,
-                acceleration,
-                timeStep
-            )) {
-            Serial.println("Nie udalo sie wygenerowac profilu trapezoidalnego");
-            return;
-        }
-
-        trajectoryGenerator_->convertToSteps(stepTrajectory);
-        motionExecutor_->setTimeStep(timeStep);
-        motionExecutor_->start(stepTrajectory, timeStep);
-
-        if (!motor_.isEnabled()) {
-            motor_.enable();
-        }
-
-        Serial.print("Trapeze configured: distance=");
-        Serial.print(distance);
-        Serial.print(", time=");
-        Serial.print(totalTime);
-        Serial.print("s, acceleration=");
-        Serial.print(acceleration);
-        Serial.print(", dt=");
-        Serial.print(timeStep);
-        Serial.println("s");
-
+        Serial.println(
+            "Uzycie: trapeze <distance> <time> <acceleration> <dt>"
+        );
         return;
     }
+
+    if (totalTime <= 0.0) {
+        Serial.println("Czas trwania musi byc > 0");
+        return;
+    }
+
+    if (acceleration <= 0.0) {
+        Serial.println("Przyspieszenie musi byc > 0");
+        return;
+    }
+
+    if (timeStep <= 0.0) {
+        Serial.println("Krok czasowy musi byc > 0");
+        return;
+    }
+
+    if (!trapeze(
+            selectedMotor_,
+            distance,
+            totalTime,
+            acceleration,
+            timeStep
+        )) {
+
+        Serial.println(
+            "Nie udalo sie uruchomic profilu trapezoidalnego"
+        );
+        return;
+    }
+
+    Serial.print("Trapeze configured: distance=");
+    Serial.print(distance);
+    Serial.print(", time=");
+    Serial.print(totalTime);
+    Serial.print("s, acceleration=");
+    Serial.print(acceleration);
+    Serial.print(", dt=");
+    Serial.print(timeStep);
+    Serial.println("s");
+
+    return;
+}
 
     // ------------------------------------------------
     // sine
@@ -613,28 +601,26 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             return;
         }
 
-        std::vector<int> stepTrajectory;
-
-        trajectoryGenerator_->sinusoidalTrajectory(
+        if (!sine(
+            selectedMotor_,
             amplitude,
             frequency,
             duration,
             timeStep
-        );
-        trajectoryGenerator_->convertToSteps(stepTrajectory);
-
-        motionExecutor_->setTimeStep(timeStep);
-        motionExecutor_->start(stepTrajectory, timeStep);
-
-        if (!motor_.isEnabled()) {
-            motor_.enable();
+        )) {
+            Serial.println(
+                "Nie udalo sie uruchomic profilu sinusoidalnego"
+            );
+            return;
         }
 
         Serial.print("Sine configured: amplitude=");
         Serial.print(amplitude);
         Serial.print(", frequency=");
         Serial.print(frequency);
-        Serial.print("Hz, dt=");
+        Serial.print("Hz, duration=");
+        Serial.print(duration);
+        Serial.print("s, dt=");
         Serial.print(timeStep);
         Serial.println("s");
 
@@ -733,6 +719,58 @@ bool SerialCommandHandler::trapeze(
         return false;
     }
 
+    trajectoryGenerator->convertToSteps(stepTrajectory);
+
+    motionExecutor->setTimeStep(timeStep);
+    motionExecutor->start(stepTrajectory, timeStep);
+
+    if (!motorDriver->isEnabled()) {
+        motorDriver->enable();
+    }
+
+    return true;
+}
+
+bool SerialCommandHandler::sine(
+    uint8_t motor,
+    double amplitude,
+    double frequency,
+    double duration,
+    double timeStep
+) {
+    if (motor > 1) {
+        return false;
+    }
+
+    MotionExecutor* motionExecutor =
+        motionExecutors_[motor];
+
+    TrajectoryGenerator* trajectoryGenerator =
+        trajectoryGenerators_[motor];
+
+    MotorDriver* motorDriver =
+        motors_[motor];
+
+    if (motionExecutor == nullptr ||
+        trajectoryGenerator == nullptr) {
+        return false;
+    }
+
+    if (amplitude < 0.0 ||
+        frequency <= 0.0 ||
+        duration <= 0.0 ||
+        timeStep <= 0.0) {
+        return false;
+    }
+
+    std::vector<int> stepTrajectory;
+
+    trajectoryGenerator->sinusoidalTrajectory(
+        amplitude,
+        frequency,
+        duration,
+        timeStep
+    );
     trajectoryGenerator->convertToSteps(stepTrajectory);
 
     motionExecutor->setTimeStep(timeStep);

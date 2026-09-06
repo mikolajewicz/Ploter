@@ -36,6 +36,14 @@ public:
     double acceleration,
     double timeStep
 );
+
+    bool sine(
+    uint8_t motor,
+    double amplitude,
+    double frequency,
+    double duration,
+    double timeStep
+);
 private:
     MotorDriver* motors_[2];
     TMC2209Stepper* tmcs_[2];
