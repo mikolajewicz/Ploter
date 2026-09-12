@@ -27,6 +27,8 @@ public:
     void convertToSteps(std::vector<int>& stepTrajectory);
 
     bool trapezoidalProfile(double distance, double time, double acceleration, double timeStep);
+
+    bool inverseKinematics(std::vector<double>& x_vect, std::vector<double>& y_vect);
 };
 
 
