@@ -4,22 +4,27 @@
 #include "MotorDriver.hpp"
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
+#include "Homing.hpp"
 
 SerialCommandHandler::SerialCommandHandler(
     MotorDriver& motor1,
     TMC2209Stepper& tmc1,
     MotionExecutor& motionExecutor1,
     TrajectoryGenerator& trajectoryGenerator1,
+    Homing& homing1,
 
     MotorDriver& motor2,
     TMC2209Stepper& tmc2,
     MotionExecutor& motionExecutor2,
-    TrajectoryGenerator& trajectoryGenerator2
+    TrajectoryGenerator& trajectoryGenerator2,
+    Homing& homing2
 )
     : motors_{&motor1, &motor2},
       tmcs_{&tmc1, &tmc2},
       motionExecutors_{&motionExecutor1, &motionExecutor2},
-      trajectoryGenerators_{&trajectoryGenerator1, &trajectoryGenerator2} {
+      trajectoryGenerators_{&trajectoryGenerator1, &trajectoryGenerator2},
+      homings_{&homing1, &homing2}
+{
 }
 
 void SerialCommandHandler::printHelp() {
@@ -475,7 +480,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
 
         if (params[i].length() == 0) {
             Serial.println(
-                "Uzycie: trapeze <distance> <time> <acceleration> <dt>"
+                "Uzycie: trapeze <distance> <time> <accelTime> <dt>"
             );
             return;
         }
@@ -483,16 +488,16 @@ void SerialCommandHandler::handleSerialCommand(String line) {
 
     double distance = 0.0;
     double totalTime = 0.0;
-    double acceleration = 0.0;
+    double accelerationTime = 0.0;
     double timeStep = 0.0;
 
     if (!parseDoubleArgument(params[0], distance) ||
         !parseDoubleArgument(params[1], totalTime) ||
-        !parseDoubleArgument(params[2], acceleration) ||
+        !parseDoubleArgument(params[2], accelerationTime) ||
         !parseDoubleArgument(params[3], timeStep)) {
 
         Serial.println(
-            "Uzycie: trapeze <distance> <time> <acceleration> <dt>"
+            "Uzycie: trapeze <distance> <time> <accelTime> <dt>"
         );
         return;
     }
@@ -502,8 +507,15 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         return;
     }
 
-    if (acceleration <= 0.0) {
-        Serial.println("Przyspieszenie musi byc > 0");
+    if (accelerationTime <= 0.0) {
+        Serial.println("Czas przyspieszania musi byc > 0");
+        return;
+    }
+
+    if (accelerationTime > totalTime / 2.0) {
+        Serial.println(
+            "Czas przyspieszania nie moze byc wiekszy niz time / 2"
+        );
         return;
     }
 
@@ -516,7 +528,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
             selectedMotor_,
             distance,
             totalTime,
-            acceleration,
+            accelerationTime,
             timeStep
         )) {
 
@@ -530,11 +542,34 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     Serial.print(distance);
     Serial.print(", time=");
     Serial.print(totalTime);
-    Serial.print("s, acceleration=");
-    Serial.print(acceleration);
-    Serial.print(", dt=");
+    Serial.print("s, accelTime=");
+    Serial.print(accelerationTime);
+    Serial.print("s, dt=");
     Serial.print(timeStep);
     Serial.println("s");
+
+    return;
+}
+
+    // ------------------------------------------------
+// home
+// ------------------------------------------------
+
+if (command == "home") {
+
+    if (homings_[selectedMotor_]->isActive()) {
+        Serial.println("Homing juz trwa");
+        return;
+    }
+
+    motionExecutors_[selectedMotor_]->stop();
+    motors_[selectedMotor_]->stop();
+
+    homings_[selectedMotor_]->home();
+
+    Serial.print("Homing M");
+    Serial.print(selectedMotor_ + 1);
+    Serial.println(" started");
 
     return;
 }
@@ -659,6 +694,8 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     Serial.println(
         "Nieznana komenda. Wpisz: help"
     );
+
+
 }
 
 void SerialCommandHandler::readSerialCommands() {
@@ -692,18 +729,14 @@ bool SerialCommandHandler::trapeze(
     uint8_t motor,
     double distance,
     double time,
-    double acceleration,
+    double accelerationTime,
     double timeStep
 ) {
-    uint8_t motorIndex = motor;
-
-    if (motor == 1) {
-        motorIndex = 0;
-    } else if (motor == 2) {
-        motorIndex = 1;
-    } else if (motor != 0) {
+    if (motor < 1 || motor > 2) {
         return false;
     }
+
+    uint8_t motorIndex = motor - 1;
 
     MotionExecutor* motionExecutor =
         motionExecutors_[motorIndex];
@@ -720,7 +753,8 @@ bool SerialCommandHandler::trapeze(
     }
 
     if (time <= 0.0 ||
-        acceleration <= 0.0 ||
+        accelerationTime <= 0.0 ||
+        accelerationTime > time / 2.0 ||
         timeStep <= 0.0) {
         return false;
     }
@@ -730,7 +764,7 @@ bool SerialCommandHandler::trapeze(
     if (!trajectoryGenerator->trapezoidalProfile(
             distance,
             time,
-            acceleration,
+            accelerationTime,
             timeStep
         )) {
         return false;
@@ -747,7 +781,6 @@ bool SerialCommandHandler::trapeze(
 
     return true;
 }
-
 bool SerialCommandHandler::cosine(
     uint8_t motor,
     double amplitude,

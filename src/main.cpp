@@ -5,6 +5,7 @@
 #include "SerialCommandHandler.h"
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
+#include "Homing.hpp"
 
 // --------------------------------------------------
 // Konfiguracja TMC2209
@@ -103,6 +104,20 @@ MotionExecutor motion_executor2(
 TrajectoryGenerator trajectory_generator1(stepsPerRevolution);
 TrajectoryGenerator trajectory_generator2(stepsPerRevolution);
 
+Homing homingMotor1(
+    motor1,
+    tmc1,
+    true,       // kierunek homingu m1
+    DIAG1_PIN
+);
+
+Homing homingMotor2(
+    motor2,
+    tmc2,
+    false,      // kierunek homingu m2
+    DIAG2_PIN
+);
+
 // --------------------------------------------------
 // Obiekt obsługi komend szeregowych
 // --------------------------------------------------
@@ -112,11 +127,13 @@ SerialCommandHandler serialCommandHandler(
     tmc1,
     motion_executor1,
     trajectory_generator1,
+    homingMotor1,
 
     motor2,
     tmc2,
     motion_executor2,
-    trajectory_generator2
+    trajectory_generator2,
+    homingMotor2
 );
 
 // --------------------------------------------------
@@ -204,9 +221,9 @@ Serial1.begin(
 // loop
 // --------------------------------------------------
 
-size_t state = 1;
 
-void loop() {
+void loop()
+{
     motor1.run();
     motor2.run();
 
@@ -215,76 +232,25 @@ void loop() {
 
     serialCommandHandler.readSerialCommands();
 
-    switch (state)
-{
-case 0: {
-    // nic nie rób
-    break;
-}
+    if (homingMotor1.update()) {
+        serialCommandHandler.trapeze(
+            1,
+            99,
+            2,
+            0.5,
+            0.01
+        );
+    }
 
-case 1: {
-    
-
-    Serial.println("=== BEFORE ===");
-
-    Serial.print("connection = ");
-    Serial.println(tmc2.test_connection());
-
-    Serial.print("IFCNT = ");
-    Serial.println(tmc2.IFCNT());
-
-    Serial.print("IRUN = ");
-    Serial.println(tmc2.irun());
-
-    Serial.print("IHOLD = ");
-    Serial.println(tmc2.ihold());
-
-    Serial.print("RMS = ");
-    Serial.println(tmc2.rms_current());
-
-    Serial.print("vsense = ");
-    Serial.println(tmc2.vsense());
-
-    tmc2.rms_current(500);
-
-    Serial.println("=== AFTER ===");
-
-    Serial.print("IFCNT = ");
-    Serial.println(tmc2.IFCNT());
-
-    Serial.print("IRUN = ");
-    Serial.println(tmc2.irun());
-
-    Serial.print("IHOLD = ");
-    Serial.println(tmc2.ihold());
-
-    Serial.print("RMS = ");
-    Serial.println(tmc2.rms_current());
-
-    Serial.print("vsense = ");
-    Serial.println(tmc2.vsense());
-
-    motor2.setSpeed(300);
-    state = 2;
-    break;
-}
-
-case 2: {
-    int diag1 = digitalRead(DIAG1_PIN);
-    int diag2 = digitalRead(DIAG2_PIN);
-
-    // if (diag2) {
-    //     Serial.println("DIAG2 HIGH");
-    // }
-
-    break;
-}
-
-default: {
-    break;
-}
-}
-
+    if (homingMotor2.update()) {
+        serialCommandHandler.trapeze(
+            2,
+            -101,
+            2,
+            0.5,
+            0.01
+        );
+    }
 }
 
 // m2 sine 90 0.1 60 0.01
