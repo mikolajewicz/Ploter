@@ -6,6 +6,7 @@
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
+#include "Kinematics.hpp"
 
 // --------------------------------------------------
 // Konfiguracja TMC2209
@@ -118,6 +119,8 @@ Homing homingMotor2(
     DIAG2_PIN
 );
 
+Kinematics Solver;
+
 // --------------------------------------------------
 // Obiekt obsługi komend szeregowych
 // --------------------------------------------------
@@ -133,7 +136,9 @@ SerialCommandHandler serialCommandHandler(
     tmc2,
     motion_executor2,
     trajectory_generator2,
-    homingMotor2
+    homingMotor2,
+
+    Solver
 );
 
 // --------------------------------------------------
@@ -215,12 +220,15 @@ Serial1.begin(
 
     pinMode(DIAG1_PIN, INPUT);
     pinMode(DIAG2_PIN, INPUT);
+
+    homingMotor2.home();
 }
 
 // --------------------------------------------------
 // loop
 // --------------------------------------------------
 
+int stateSwitch = 1;
 
 void loop()
 {
@@ -245,12 +253,19 @@ void loop()
     if (homingMotor2.update()) {
         serialCommandHandler.trapeze(
             2,
-            -101,
+            -53,
             2,
             0.5,
             0.01
         );
     }
+
+    if (stateSwitch == 1){
+        serialCommandHandler.A2B(0, 0, -100, 100, 2);
+        stateSwitch = 0;
+    }
+
+
 }
 
 // m2 sine 90 0.1 60 0.01

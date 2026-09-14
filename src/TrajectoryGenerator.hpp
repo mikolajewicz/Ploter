@@ -26,11 +26,15 @@ public:
 
     bool getNextPosition(double& point);
 
-    void convertToSteps(std::vector<int>& stepTrajectory);
+    void convertToSteps();
 
     bool trapezoidalProfile(double distance, double time, double acceleration, double timeStep);
 
-    bool inverseKinematics(std::vector<double>& x_vect, std::vector<double>& y_vect);
+    void setTrajectory(std::vector<double>&& trajectoryPoints);
+
+    std::vector<int> takeStepTrajectory() {
+        return std::move(stepTrajectory);
+    }
 };
 
 

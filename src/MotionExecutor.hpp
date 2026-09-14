@@ -11,7 +11,10 @@ public:
     explicit MotionExecutor(MotorDriver& motorDriver, double timeStep = 0.0)
         : motorDriver(motorDriver), intervalDurationUs(timeStep > 0.0 ? static_cast<uint32_t>(timeStep * 1000000.0) : 0) {}
 
-    void start(const std::vector<int>& stepTrajectory, double timeStep);
+    void start(
+        std::vector<int>&& stepTrajectory,
+        double timeStep
+    );
 
     void update();
 

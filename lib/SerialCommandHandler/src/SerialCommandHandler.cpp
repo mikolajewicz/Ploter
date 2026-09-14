@@ -5,6 +5,7 @@
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
+#include "Kinematics.hpp"
 
 SerialCommandHandler::SerialCommandHandler(
     MotorDriver& motor1,
@@ -17,13 +18,17 @@ SerialCommandHandler::SerialCommandHandler(
     TMC2209Stepper& tmc2,
     MotionExecutor& motionExecutor2,
     TrajectoryGenerator& trajectoryGenerator2,
-    Homing& homing2
+    Homing& homing2,
+
+    Kinematics& Solver
 )
     : motors_{&motor1, &motor2},
       tmcs_{&tmc1, &tmc2},
       motionExecutors_{&motionExecutor1, &motionExecutor2},
       trajectoryGenerators_{&trajectoryGenerator1, &trajectoryGenerator2},
-      homings_{&homing1, &homing2}
+      homings_{&homing1, &homing2},
+      Solver(Solver)
+
 {
 }
 
@@ -552,10 +557,10 @@ void SerialCommandHandler::handleSerialCommand(String line) {
 }
 
     // ------------------------------------------------
-// home
-// ------------------------------------------------
+    // home
+    // ------------------------------------------------
 
-if (command == "home") {
+    if (command == "home") {
 
     if (homings_[selectedMotor_]->isActive()) {
         Serial.println("Homing juz trwa");
@@ -770,10 +775,10 @@ bool SerialCommandHandler::trapeze(
         return false;
     }
 
-    trajectoryGenerator->convertToSteps(stepTrajectory);
+    trajectoryGenerator->convertToSteps();
 
     motionExecutor->setTimeStep(timeStep);
-    motionExecutor->start(stepTrajectory, timeStep);
+    motionExecutor->start(std::move(stepTrajectory), timeStep);
 
     if (!motorDriver->isEnabled()) {
         motorDriver->enable();
@@ -819,24 +824,49 @@ bool SerialCommandHandler::cosine(
         return false;
     }
 
-    std::vector<int> stepTrajectory;
-
     trajectoryGenerator->cosinusoidalTrajectory(
         amplitude,
         frequency,
         duration,
         timeStep
     );
-    trajectoryGenerator->convertToSteps(stepTrajectory);
+    trajectoryGenerator->convertToSteps();
 
     motionExecutor->setTimeStep(timeStep);
-    motionExecutor->start(stepTrajectory, timeStep);
+    motionExecutor->start(
+        trajectoryGenerator->takeStepTrajectory(),
+        timeStep
+    );
 
     if (!motorDriver->isEnabled()) {
         motorDriver->enable();
     }
 
     return true;
+}
+
+void SerialCommandHandler::A2B(
+    double pointA_x, 
+    double pointA_y, 
+    double pointB_x, 
+    double pointB_y,
+    double time,
+    double timeStep
+){   
+        Solver.A2B(pointA_x, pointA_y, pointB_x, pointB_y, time, timeStep);
+        Solver.compute();
+
+        trajectoryGenerators_[0]->setTrajectory(Solver.takeMotor1Trajectory());
+        trajectoryGenerators_[1]->setTrajectory(Solver.takeMotor2Trajectory());
+
+        trajectoryGenerators_[0]->convertToSteps();
+        trajectoryGenerators_[1]->convertToSteps();
+
+        motionExecutors_[0]->setTimeStep(timeStep);
+        motionExecutors_[0]->start(trajectoryGenerators_[0]->takeStepTrajectory(), timeStep);
+
+        motionExecutors_[1]->setTimeStep(timeStep);
+        motionExecutors_[1]->start(trajectoryGenerators_[1]->takeStepTrajectory(), timeStep);
 }
 
 void SerialCommandHandler::stopAll()

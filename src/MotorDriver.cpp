@@ -163,3 +163,4 @@ void MotorDriver::step() {
     delayMicroseconds(1); // Krótki czas trwania impulsu
     digitalWrite(stepPin, LOW);
 }
+

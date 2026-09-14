@@ -1,11 +1,11 @@
-#include "kinematics.hpp"
+#include "Kinematics.hpp"
 
-kinematics::kinematics()
+Kinematics::Kinematics()
 {
     // Constructor implementation (if needed)
 }
 
-void kinematics::pathInput(double dt)
+void Kinematics::pathInput(double dt)
 {
     double frequency = 0.1;
     for (size_t i = 0; i < 1/dt; ++i)
@@ -15,14 +15,13 @@ void kinematics::pathInput(double dt)
     }
 }
 
-bool kinematics::setPath(std::vector<double>& x_vect, std::vector<double>& y_vect)
+void Kinematics::setPath(std::vector<double>& x_vect, std::vector<double>& y_vect)
 {
     this->x_vect = x_vect;
     this->y_vect = y_vect;
-    return true;
 }
 
-bool kinematics::compute()
+bool Kinematics::compute()
 {
     theta_1_vect.clear();
     theta_2_vect.clear();
@@ -80,3 +79,152 @@ bool kinematics::compute()
     return true;
 }
 
+bool Kinematics::A2B(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double time,
+    double dt){
+    return A2B(
+        pointA_x,
+        pointA_y,
+        pointB_x,
+        pointB_y,
+        time,
+        dt,
+        time / 3.0
+    );
+}
+
+
+bool Kinematics::A2B(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double time,
+    double timeStep,
+    double accelerationTime){
+        double distance_x = pointB_x - pointA_x;
+        double distance_y = pointB_y - pointA_y;
+
+        if (time <= 0.0 ||
+            accelerationTime <= 0.0 ||
+            accelerationTime > time / 2.0 ||
+            timeStep <= 0.0) {
+                return false;
+        }
+        double sign_x = 1.0;
+        double sign_y = 1.0;
+
+        if (distance_x < 0.0) {
+            sign_x = -1.0;
+            distance_x = -distance_x;
+        }
+
+        if (distance_y < 0.0) {
+            sign_y = -1.0;
+            distance_y = -distance_y;
+        }
+
+        x_vect.clear();
+        y_vect.clear();
+
+        size_t samples =
+        static_cast<size_t>(time / timeStep);
+
+        double t_accel = accelerationTime;
+
+        double t_const =
+            time - 2.0 * accelerationTime;
+
+        double acceleration_x =
+            distance_x /
+            (accelerationTime * (time - accelerationTime));
+
+        double acceleration_y =
+            distance_y /
+            (accelerationTime * (time - accelerationTime));
+
+        double v_max_x =
+            acceleration_x * accelerationTime;
+
+        double v_max_y =
+            acceleration_y * accelerationTime;
+
+        for (size_t i = 0; i <= samples; ++i) {
+        double t = i * timeStep;
+
+        if (t <= t_accel) {
+
+            x_vect.push_back(
+                pointA_x + 
+                sign_x *
+                0.5 *
+                acceleration_x *
+                t * t
+            );
+
+            y_vect.push_back(
+                pointA_y + 
+                sign_y *
+                0.5 *
+                acceleration_y *
+                t * t
+            );
+        }
+        else if (t <= t_accel + t_const) {
+
+            x_vect.push_back(
+                pointA_x +
+                sign_x * (
+                    v_max_x * (t - t_accel) +
+                    0.5 *
+                    acceleration_x *
+                    t_accel *
+                    t_accel
+                )
+            );
+
+            y_vect.push_back(
+                pointA_y +
+                sign_y * (
+                    v_max_y * (t - t_accel) +
+                    0.5 *
+                    acceleration_y *
+                    t_accel *
+                    t_accel
+                )
+            );
+        }
+        else {
+
+            x_vect.push_back(
+                pointA_x +
+                sign_x * (
+                    distance_x -
+                    0.5 *
+                    acceleration_x *
+                    (time - t) *
+                    (time - t)
+                )
+            );
+
+            y_vect.push_back(
+                pointA_y +
+                sign_y * (
+                    distance_y -
+                    0.5 *
+                    acceleration_y *
+                    (time - t) *
+                    (time - t)
+                )
+            );
+        }
+        
+    }
+    return true;
+}
+
+    

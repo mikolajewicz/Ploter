@@ -2,9 +2,12 @@
 #include <Arduino.h>
 #include <cstdlib>   // std::abs
 
-void MotionExecutor::start(const std::vector<int>& stepTrajectory, double timeStep)
+void MotionExecutor::start(
+    std::vector<int>&& stepTrajectory,
+    double timeStep
+)
 {
-    trajectory = stepTrajectory;
+    trajectory = std::move(stepTrajectory);
 
     currentInterval = 0;
     intervalDurationUs = static_cast<uint32_t>(timeStep * 1000000.0);

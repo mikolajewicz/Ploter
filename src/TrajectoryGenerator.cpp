@@ -128,7 +128,8 @@ bool TrajectoryGenerator::getCurrentPosition(double& point) {
     return true;
 }
 
-void TrajectoryGenerator::convertToSteps(std::vector<int>& stepTrajectory) {
+void TrajectoryGenerator::convertToSteps() {
+    
     stepTrajectory.clear();
     
     current_id = 0;
@@ -142,4 +143,13 @@ void TrajectoryGenerator::convertToSteps(std::vector<int>& stepTrajectory) {
         
         stepTrajectory.push_back(stepValue);
     }
-}   
+}  
+
+void TrajectoryGenerator::setTrajectory(std::vector<double>&& trajectoryPoints){
+    trajectoryPoints = std::move(trajectoryPoints);
+}
+
+
+
+
+

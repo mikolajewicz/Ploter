@@ -7,6 +7,7 @@
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
+#include "Kinematics.hpp"
 
 class SerialCommandHandler {
 private:
@@ -15,6 +16,7 @@ private:
     MotionExecutor* motionExecutors_[2];
     TrajectoryGenerator* trajectoryGenerators_[2];
     Homing* homings_[2];
+    Kinematics Solver;
 
     uint8_t selectedMotor_ = 0;
 
@@ -46,7 +48,9 @@ public:
         TMC2209Stepper& tmc2,
         MotionExecutor& motionExecutor2,
         TrajectoryGenerator& trajectoryGenerator2,
-        Homing& homing2
+        Homing& homing2,
+
+        Kinematics& Solver
     );
 
     void readSerialCommands();
@@ -68,6 +72,15 @@ public:
         double frequency,
         double duration,
         double timeStep
+    );
+
+    void A2B(
+        double pointA_x, 
+        double pointA_y, 
+        double pointB_x, 
+        double pointB_y,
+        double time,
+        double timestep = 0.01
     );
 
     void stopAll();
