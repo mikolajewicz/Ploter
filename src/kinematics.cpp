@@ -36,9 +36,9 @@ bool Kinematics::compute()
         double l2 = 260.0; // Length of the second arm segment
 
         double kx = x_vect[i];
-        double ky = y_vect[i];
+        double ky = y_vect[i] + 150 + A4_height/2;
 
-        if (abs(kx) > A4_width/2 - margin || abs(ky) > A4_height/2 - margin)
+        if (abs(kx) > A4_width/2 - margin || ky > 150 + A4_height - margin || ky < 150 + margin)
         {
             Serial.println(
                 "Invalid path point: (" + String(kx) + ", " + String(ky) + ")"
