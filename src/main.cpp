@@ -21,20 +21,35 @@ constexpr uint32_t TMC1_BAUD_RATE = 115200;
 constexpr uint32_t TMC2_BAUD_RATE = 115200;
 
 // UART ESP32 -> TMC2209
-constexpr int TMC1_RX_PIN = 16;
-constexpr int TMC1_TX_PIN = 17;
 
-constexpr int TMC2_RX_PIN = 21;
-constexpr int TMC2_TX_PIN = 22;
+// TMC1:
+// GPIO21 = RX, GPIO22 = TX przez R1 1k
+constexpr int TMC1_RX_PIN = 21;
+constexpr int TMC1_TX_PIN = 22;
+
+// TMC2:
+// GPIO16 = RX, GPIO17 = TX przez R2 1k
+constexpr int TMC2_RX_PIN = 16;
+constexpr int TMC2_TX_PIN = 17;
+
 
 // STEP / DIR / ENABLE
+
+// Motor 1
 constexpr int STEP1_PIN = 32;
 constexpr int DIR1_PIN = 33;
 constexpr int ENABLE1_PIN = 27;
 
+// Motor 2
 constexpr int STEP2_PIN = 25;
 constexpr int DIR2_PIN = 26;
 constexpr int ENABLE2_PIN = 18;
+
+
+// DIAG
+
+constexpr int DIAG1_PIN = 34;
+constexpr int DIAG2_PIN = 35;
 
 // Początkowe ustawienia
 constexpr uint16_t INITIAL_RMS_CURRENT = 600;
@@ -181,14 +196,15 @@ Serial1.begin(
     serialCommandHandler.printHelp();
     serialCommandHandler.printStatus();
 
-    serialCommandHandler.cosine(
-                1, 90, 0.1, 60, 0.01
-    );
+    pinMode(DIAG1_PIN, INPUT);
+    pinMode(DIAG2_PIN, INPUT);
 }
 
 // --------------------------------------------------
 // loop
 // --------------------------------------------------
+
+size_t state = 1;
 
 void loop() {
     motor1.run();
@@ -199,47 +215,76 @@ void loop() {
 
     serialCommandHandler.readSerialCommands();
 
-    if (!motion_executor1.isActive()) {
-        serialCommandHandler.cosine(
-                1, 90, 0.1, 10, 0.01
-    )   ;
-    }
+    switch (state)
+{
+case 0: {
+    // nic nie rób
+    break;
+}
 
-    if (!serialCommandHandler.isStopped()) {
+case 1: {
+    
 
-        if (sequenceState == 0 &&
-            !motion_executor2.isActive()) {
+    Serial.println("=== BEFORE ===");
 
-            serialCommandHandler.cosine(
-                2, 90, 0.1, 10, 0.01
-            );
+    Serial.print("connection = ");
+    Serial.println(tmc2.test_connection());
 
-            sequenceState = 1;
-        }
-        else if (sequenceState == 1 &&
-                 !motion_executor2.isActive()) {
+    Serial.print("IFCNT = ");
+    Serial.println(tmc2.IFCNT());
 
-            serialCommandHandler.trapeze(
-                2, 90, 3, 1.0, 0.01
-            );
+    Serial.print("IRUN = ");
+    Serial.println(tmc2.irun());
 
-            sequenceState = 2;
-        }
-        else if (sequenceState == 2 &&
-                 !motion_executor2.isActive()) {
+    Serial.print("IHOLD = ");
+    Serial.println(tmc2.ihold());
 
-            serialCommandHandler.trapeze(
-                2, -90, 3, 1.0, 0.01
-            );
+    Serial.print("RMS = ");
+    Serial.println(tmc2.rms_current());
 
-            sequenceState = 3;
-        }
-        else if (sequenceState == 3 &&
-                 !motion_executor2.isActive()) {
+    Serial.print("vsense = ");
+    Serial.println(tmc2.vsense());
 
-            sequenceState = 0;
-        }
-    }
+    tmc2.rms_current(500);
+
+    Serial.println("=== AFTER ===");
+
+    Serial.print("IFCNT = ");
+    Serial.println(tmc2.IFCNT());
+
+    Serial.print("IRUN = ");
+    Serial.println(tmc2.irun());
+
+    Serial.print("IHOLD = ");
+    Serial.println(tmc2.ihold());
+
+    Serial.print("RMS = ");
+    Serial.println(tmc2.rms_current());
+
+    Serial.print("vsense = ");
+    Serial.println(tmc2.vsense());
+
+    motor2.setSpeed(300);
+    state = 2;
+    break;
+}
+
+case 2: {
+    int diag1 = digitalRead(DIAG1_PIN);
+    int diag2 = digitalRead(DIAG2_PIN);
+
+    // if (diag2) {
+    //     Serial.println("DIAG2 HIGH");
+    // }
+
+    break;
+}
+
+default: {
+    break;
+}
+}
+
 }
 
 // m2 sine 90 0.1 60 0.01
