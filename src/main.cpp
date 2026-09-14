@@ -260,9 +260,16 @@ void loop()
         );
     }
 
-    if (stateSwitch == 1){
-        serialCommandHandler.A2B(0, 0, -100, 100, 2);
-        stateSwitch = 0;
+    if (stateSwitch == 1 &&
+        !homingMotor2.isActive() &&
+        !motion_executor2.isActive()) {
+            serialCommandHandler.A2B(
+            0,
+            0,
+            -50,
+            50,
+            2);
+            stateSwitch = 0;
     }
 
 

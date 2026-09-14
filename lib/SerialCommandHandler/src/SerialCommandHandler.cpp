@@ -530,7 +530,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     }
 
     if (!trapeze(
-            selectedMotor_,
+            selectedMotor_+1,
             distance,
             totalTime,
             accelerationTime,
@@ -653,7 +653,7 @@ void SerialCommandHandler::handleSerialCommand(String line) {
         }
 
         if (!cosine(
-            selectedMotor_,
+            selectedMotor_+1,
             amplitude,
             frequency,
             duration,
@@ -764,8 +764,6 @@ bool SerialCommandHandler::trapeze(
         return false;
     }
 
-    std::vector<int> stepTrajectory;
-
     if (!trajectoryGenerator->trapezoidalProfile(
             distance,
             time,
@@ -778,7 +776,7 @@ bool SerialCommandHandler::trapeze(
     trajectoryGenerator->convertToSteps();
 
     motionExecutor->setTimeStep(timeStep);
-    motionExecutor->start(std::move(stepTrajectory), timeStep);
+    motionExecutor->start(trajectoryGenerator->takeStepTrajectory(), timeStep);
 
     if (!motorDriver->isEnabled()) {
         motorDriver->enable();

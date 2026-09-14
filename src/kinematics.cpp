@@ -27,13 +27,13 @@ bool Kinematics::compute()
     theta_2_vect.clear();
 
     double A4_width = 210.0; // mm
-    double A4_height = 210.0; // mm
+    double A4_height = 297.0; // mm
     double margin = 10.0; // mm
 
     for (size_t i = 0; i < x_vect.size(); ++i)
     {
-        double l1 = 100.0; // Length of the first arm segment
-        double l2 = 100.0; // Length of the second arm segment
+        double l1 = 180.0; // Length of the first arm segment
+        double l2 = 260.0; // Length of the second arm segment
 
         double kx = x_vect[i];
         double ky = y_vect[i];
