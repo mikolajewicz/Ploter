@@ -31,6 +31,13 @@ public:
     std::vector<double> takeMotor1Trajectory(){return std::move(theta_1_vect);}
     std::vector<double> takeMotor2Trajectory(){return std::move(theta_2_vect);}
 
+    bool line(
+        double pointA_x,
+        double pointA_y,
+        double pointB_x,
+        double pointB_y,
+        double speed, // mm/s
+        double timeStep = 0.01);
 private:
     std::vector<double> x_vect;
     std::vector<double> y_vect;

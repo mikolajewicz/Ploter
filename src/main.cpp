@@ -7,6 +7,7 @@
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
 #include "Kinematics.hpp"
+#include "MotionManager.hpp"
 
 // --------------------------------------------------
 // Konfiguracja TMC2209
@@ -126,6 +127,22 @@ Kinematics Solver;
 // --------------------------------------------------
 
 SerialCommandHandler serialCommandHandler(
+    motor1,
+    tmc1,
+    motion_executor1,
+    trajectory_generator1,
+    homingMotor1,
+
+    motor2,
+    tmc2,
+    motion_executor2,
+    trajectory_generator2,
+    homingMotor2,
+
+    Solver
+);
+
+MotionManager motionManager(
     motor1,
     tmc1,
     motion_executor1,
@@ -263,12 +280,36 @@ void loop()
     if (stateSwitch == 1 &&
         !homingMotor2.isActive() &&
         !motion_executor2.isActive()) {
-            serialCommandHandler.A2B(
+            motionManager.A2B(
             0,
             0,
             -50,
             50,
             2);
+            stateSwitch = 2;
+    }
+
+    if (stateSwitch == 2 &&
+        !homingMotor2.isActive() &&
+        !motion_executor2.isActive()) {
+            motionManager.line(
+            -50,
+            50,
+            0,
+            0,
+            50);
+            stateSwitch = 3;
+    }
+
+    if (stateSwitch == 3 &&
+        !homingMotor2.isActive() &&
+        !motion_executor2.isActive()) {
+            motionManager.line(
+            0,
+            0,
+            50,
+            -50,
+            50);
             stateSwitch = 0;
     }
 

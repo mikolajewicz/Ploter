@@ -227,4 +227,57 @@ bool Kinematics::A2B(
     return true;
 }
 
+bool Kinematics::line(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double speed,
+    double timeStep
+)
+{
+    if (speed <= 0.0 || timeStep <= 0.0) {
+        return false;
+    }
+
+    double dx = pointB_x - pointA_x;
+    double dy = pointB_y - pointA_y;
+
+    double distance = std::hypot(dx, dy);
+
+    if (distance == 0.0) {
+        return false;
+    }
+
+    double time = distance / speed;
+
+    size_t samples =
+        static_cast<size_t>(time / timeStep);
+
+    x_vect.clear();
+    y_vect.clear();
+
+    for (size_t i = 0; i <= samples; ++i) {
+        double t = i * timeStep;
+
+        double progress = t / time;
+
+        x_vect.push_back(
+            pointA_x + dx * progress
+        );
+
+        y_vect.push_back(
+            pointA_y + dy * progress
+        );
+    }
+
+    // jesli timeStep nie trafia idealnie w koniec
+    if (samples * timeStep < time) {
+        x_vect.push_back(pointB_x);
+        y_vect.push_back(pointB_y);
+    }
+
+    return true;
+}
+
     
