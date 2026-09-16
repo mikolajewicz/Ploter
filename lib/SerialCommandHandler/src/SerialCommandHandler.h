@@ -9,6 +9,9 @@
 #include "Homing.hpp"
 #include "Kinematics.hpp"
 
+// Forward declaration to avoid including MotionManager header here
+class MotionManager;
+
 class SerialCommandHandler {
 private:
     MotorDriver* motors_[2];
@@ -16,7 +19,6 @@ private:
     MotionExecutor* motionExecutors_[2];
     TrajectoryGenerator* trajectoryGenerators_[2];
     Homing* homings_[2];
-    Kinematics Solver;
 
     uint8_t selectedMotor_ = 0;
 
@@ -36,6 +38,7 @@ private:
 
     void handleSerialCommand(String line);
 
+    MotionManager& motionManager;
 public:
     SerialCommandHandler(
         MotorDriver& motor1,
@@ -50,7 +53,7 @@ public:
         TrajectoryGenerator& trajectoryGenerator2,
         Homing& homing2,
 
-        Kinematics& Solver
+        MotionManager& motionManager
     );
 
     void readSerialCommands();
@@ -74,14 +77,24 @@ public:
         double timeStep
     );
 
-    void A2B(
-        double pointA_x, 
-        double pointA_y, 
-        double pointB_x, 
+    void stopAll();
+
+    bool A2B(
+        double pointA_x,
+        double pointA_y,
+        double pointB_x,
         double pointB_y,
         double time,
-        double timestep = 0.01
+        double timeStep
     );
 
-    void stopAll();
+    bool line(
+        double ax,
+        double ay,
+        double bx,
+        double by,
+        double speed,
+        double timeStep
+    );
+
 };

@@ -13,6 +13,8 @@
 #include "Homing.hpp"
 #include "Kinematics.hpp"
 
+#include <vector>
+
 
 
 class MotionManager
@@ -102,20 +104,20 @@ public:
 
     bool startPreparedMotion();
 
-    bool isTrajectoryReady() const;
+    bool isTrajectoryReady();
 
     bool beginPlanner();
 
-bool planA2B(
-    double pointA_x,
-    double pointA_y,
-    double pointB_x,
-    double pointB_y,
-    double time,
-    double timeStep
+    bool planA2B(
+        double pointA_x,
+        double pointA_y,
+        double pointB_x,
+        double pointB_y,
+        double time,
+        double timeStep
 );
 
-bool planLine(
+    bool planLine(
     double pointA_x,
     double pointA_y,
     double pointB_x,

@@ -6,6 +6,7 @@
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
 #include "Kinematics.hpp"
+#include "MotionManager.hpp"
 
 SerialCommandHandler::SerialCommandHandler(
     MotorDriver& motor1,
@@ -20,14 +21,14 @@ SerialCommandHandler::SerialCommandHandler(
     TrajectoryGenerator& trajectoryGenerator2,
     Homing& homing2,
 
-    Kinematics& Solver
+    MotionManager& motionManager
 )
     : motors_{&motor1, &motor2},
       tmcs_{&tmc1, &tmc2},
       motionExecutors_{&motionExecutor1, &motionExecutor2},
       trajectoryGenerators_{&trajectoryGenerator1, &trajectoryGenerator2},
       homings_{&homing1, &homing2},
-      Solver(Solver)
+      motionManager(motionManager)
 
 {
 }
@@ -737,53 +738,54 @@ bool SerialCommandHandler::trapeze(
     double accelerationTime,
     double timeStep
 ) {
-    if (motor < 1 || motor > 2) {
-        return false;
-    }
+    // if (motor < 1 || motor > 2) {
+    //     return false;
+    // }
 
-    uint8_t motorIndex = motor - 1;
+    // uint8_t motorIndex = motor - 1;
 
-    MotionExecutor* motionExecutor =
-        motionExecutors_[motorIndex];
+    // MotionExecutor* motionExecutor =
+    //     motionExecutors_[motorIndex];
 
-    TrajectoryGenerator* trajectoryGenerator =
-        trajectoryGenerators_[motorIndex];
+    // TrajectoryGenerator* trajectoryGenerator =
+    //     trajectoryGenerators_[motorIndex];
 
-    MotorDriver* motorDriver =
-        motors_[motorIndex];
+    // MotorDriver* motorDriver =
+    //     motors_[motorIndex];
 
-    if (motionExecutor == nullptr ||
-        trajectoryGenerator == nullptr) {
-        return false;
-    }
+    // if (motionExecutor == nullptr ||
+    //     trajectoryGenerator == nullptr) {
+    //     return false;
+    // }
 
-    if (time <= 0.0 ||
-        accelerationTime <= 0.0 ||
-        accelerationTime > time / 2.0 ||
-        timeStep <= 0.0) {
-        return false;
-    }
+    // if (time <= 0.0 ||
+    //     accelerationTime <= 0.0 ||
+    //     accelerationTime > time / 2.0 ||
+    //     timeStep <= 0.0) {
+    //     return false;
+    // }
 
-    if (!trajectoryGenerator->trapezoidalProfile(
-            distance,
-            time,
-            accelerationTime,
-            timeStep
-        )) {
-        return false;
-    }
+    // if (!trajectoryGenerator->trapezoidalProfile(
+    //         distance,
+    //         time,
+    //         accelerationTime,
+    //         timeStep
+    //     )) {
+    //     return false;
+    // }
 
-    trajectoryGenerator->convertToSteps();
+    // trajectoryGenerator->convertToSteps();
 
-    motionExecutor->setTimeStep(timeStep);
-    motionExecutor->start(trajectoryGenerator->takeStepTrajectory(), timeStep);
+    // motionExecutor->setTimeStep(timeStep);
+    // motionExecutor->start(trajectoryGenerator->takeStepTrajectory(), timeStep);
 
-    if (!motorDriver->isEnabled()) {
-        motorDriver->enable();
-    }
+    // if (!motorDriver->isEnabled()) {
+    //     motorDriver->enable();
+    // }
 
-    return true;
+    return false;
 }
+
 bool SerialCommandHandler::cosine(
     uint8_t motor,
     double amplitude,
@@ -791,80 +793,93 @@ bool SerialCommandHandler::cosine(
     double duration,
     double timeStep
 ) {
-    uint8_t motorIndex = motor;
+    // uint8_t motorIndex = motor;
 
-    if (motor == 1) {
-        motorIndex = 0;
-    } else if (motor == 2) {
-        motorIndex = 1;
-    } else if (motor != 0) {
-        return false;
-    }
+    // if (motor == 1) {
+    //     motorIndex = 0;
+    // } else if (motor == 2) {
+    //     motorIndex = 1;
+    // } else if (motor != 0) {
+    //     return false;
+    // }
 
-    MotionExecutor* motionExecutor =
-        motionExecutors_[motorIndex];
+    // MotionExecutor* motionExecutor =
+    //     motionExecutors_[motorIndex];
 
-    TrajectoryGenerator* trajectoryGenerator =
-        trajectoryGenerators_[motorIndex];
+    // TrajectoryGenerator* trajectoryGenerator =
+    //     trajectoryGenerators_[motorIndex];
 
-    MotorDriver* motorDriver =
-        motors_[motorIndex];
+    // MotorDriver* motorDriver =
+    //     motors_[motorIndex];
 
-    if (motionExecutor == nullptr ||
-        trajectoryGenerator == nullptr) {
-        return false;
-    }
+    // if (motionExecutor == nullptr ||
+    //     trajectoryGenerator == nullptr) {
+    //     return false;
+    // }
 
-    if (amplitude < 0.0 ||
-        frequency <= 0.0 ||
-        duration <= 0.0 ||
-        timeStep <= 0.0) {
-        return false;
-    }
+    // if (amplitude < 0.0 ||
+    //     frequency <= 0.0 ||
+    //     duration <= 0.0 ||
+    //     timeStep <= 0.0) {
+    //     return false;
+    // }
 
-    trajectoryGenerator->cosinusoidalTrajectory(
-        amplitude,
-        frequency,
-        duration,
-        timeStep
-    );
-    trajectoryGenerator->convertToSteps();
+    // trajectoryGenerator->cosinusoidalTrajectory(
+    //     amplitude,
+    //     frequency,
+    //     duration,
+    //     timeStep
+    // );
+    // trajectoryGenerator->convertToSteps();
 
-    motionExecutor->setTimeStep(timeStep);
-    motionExecutor->start(
-        trajectoryGenerator->takeStepTrajectory(),
-        timeStep
-    );
+    // motionExecutor->setTimeStep(timeStep);
+    // motionExecutor->start(
+    //     trajectoryGenerator->takeStepTrajectory(),
+    //     timeStep
+    // );
 
-    if (!motorDriver->isEnabled()) {
-        motorDriver->enable();
-    }
+    // if (!motorDriver->isEnabled()) {
+    //     motorDriver->enable();
+    // }
 
-    return true;
+    return false;
 }
 
-void SerialCommandHandler::A2B(
-    double pointA_x, 
-    double pointA_y, 
-    double pointB_x, 
+bool SerialCommandHandler::A2B(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
     double pointB_y,
     double time,
     double timeStep
-){   
-        Solver.A2B(pointA_x, pointA_y, pointB_x, pointB_y, time, timeStep);
-        Solver.compute();
-
-        trajectoryGenerators_[0]->setTrajectory(Solver.takeMotor1Trajectory());
-        trajectoryGenerators_[1]->setTrajectory(Solver.takeMotor2Trajectory());
-
-        trajectoryGenerators_[0]->convertToSteps();
-        trajectoryGenerators_[1]->convertToSteps();
-
-        motionExecutors_[0]->setTimeStep(timeStep);
-        motionExecutors_[0]->start(trajectoryGenerators_[0]->takeStepTrajectory(), timeStep);
-
-        motionExecutors_[1]->setTimeStep(timeStep);
-        motionExecutors_[1]->start(trajectoryGenerators_[1]->takeStepTrajectory(), timeStep);
+)
+{
+    return motionManager.planA2B(
+        pointA_x,
+        pointA_y,
+        pointB_x,
+        pointB_y,
+        time,
+        timeStep
+    );
+}
+bool SerialCommandHandler::line(
+    double ax,
+    double ay,
+    double bx,
+    double by,
+    double speed,
+    double timeStep
+)
+{
+    return motionManager.planLine(
+        ax,
+        ay,
+        bx,
+        by,
+        speed,
+        timeStep
+    );
 }
 
 void SerialCommandHandler::stopAll()

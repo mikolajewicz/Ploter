@@ -13,6 +13,10 @@
 // Konfiguracja TMC2209
 // --------------------------------------------------
 
+
+constexpr double TIME_STEP = 0.01;
+constexpr double LINE_SPEED = 50.0;
+
 constexpr unsigned int stepsPerRevolution = 4 * 16 * 400;
 
 constexpr float R_SENSE = 0.11f;
@@ -126,22 +130,6 @@ Kinematics Solver;
 // Obiekt obsługi komend szeregowych
 // --------------------------------------------------
 
-SerialCommandHandler serialCommandHandler(
-    motor1,
-    tmc1,
-    motion_executor1,
-    trajectory_generator1,
-    homingMotor1,
-
-    motor2,
-    tmc2,
-    motion_executor2,
-    trajectory_generator2,
-    homingMotor2,
-
-    Solver
-);
-
 MotionManager motionManager(
     motor1,
     tmc1,
@@ -157,6 +145,26 @@ MotionManager motionManager(
 
     Solver
 );
+
+SerialCommandHandler serialCommandHandler(
+    motor1,
+    tmc1,
+    motion_executor1,
+    trajectory_generator1,
+    homingMotor1,
+
+    motor2,
+    tmc2,
+    motion_executor2,
+    trajectory_generator2,
+    homingMotor2,
+
+    motionManager
+);
+
+
+
+
 
 // --------------------------------------------------
 // setup
@@ -238,14 +246,19 @@ Serial1.begin(
     pinMode(DIAG1_PIN, INPUT);
     pinMode(DIAG2_PIN, INPUT);
 
-    homingMotor2.home();
+    if (!motionManager.beginPlanner()) {
+    Serial.println("Planner ERROR");
+    }
 }
 
 // --------------------------------------------------
 // loop
 // --------------------------------------------------
 
-int stateSwitch = 1;
+int stateSwitch = 0;
+
+bool motor1Homed = false;
+bool motor2Homed = false;
 
 void loop()
 {
@@ -255,67 +268,319 @@ void loop()
     motion_executor1.update();
     motion_executor2.update();
 
-    serialCommandHandler.readSerialCommands();
 
-    if (homingMotor1.update()) {
-        serialCommandHandler.trapeze(
-            1,
-            99,
-            2,
-            0.5,
-            0.01
-        );
-    }
+    switch (stateSwitch)
+    {
+        // ==================================================
+        // 0 - START HOMINGU
+        // ==================================================
+        case 0:
+        {
+            Serial.println("Homing started");
 
-    if (homingMotor2.update()) {
-        serialCommandHandler.trapeze(
-            2,
-            -53,
-            2,
-            0.5,
-            0.01
-        );
-    }
+            homingMotor1.home();
+            homingMotor2.home();
 
-    if (stateSwitch == 1 &&
-        !homingMotor2.isActive() &&
-        !motion_executor2.isActive()) {
-            motionManager.A2B(
-            0,
-            0,
-            -50,
-            50,
-            2);
-            stateSwitch = 2;
-    }
+            stateSwitch = 1;
+            break;
+        }
 
-    if (stateSwitch == 2 &&
-        !homingMotor2.isActive() &&
-        !motion_executor2.isActive()) {
-            motionManager.line(
-            -50,
-            50,
-            0,
-            0,
-            50);
+
+        // ==================================================
+        // 1 - CZEKAMY NA OBA HOMINGI
+        // ==================================================
+        case 1:
+        {
+            if (homingMotor1.update())
+            {
+                motor1Homed = true;
+                Serial.println("M1 homed");
+            }
+
+            if (homingMotor2.update())
+            {
+                motor2Homed = true;
+                Serial.println("M2 homed");
+            }
+
+            if (motor1Homed && motor2Homed)
+            {
+                Serial.println("Both motors homed");
+
+                stateSwitch = 2;
+            }
+
+            break;
+        }
+
+
+        // ==================================================
+        // 2 - ODJAZD OD KRAŃCÓWEK DO POZYCJI "0"
+        //
+        // M1: +99 stopni
+        // M2: -53 stopnie
+        // ==================================================
+        case 2:
+        {
+            Serial.println("Moving from home to zero position");
+
+            bool ok1 =
+                trajectory_generator1.trapezoidalProfile(
+                    99.0,
+                    2.0,
+                    0.5,
+                    TIME_STEP
+                );
+
+            bool ok2 =
+                trajectory_generator2.trapezoidalProfile(
+                    -53.0,
+                    2.0,
+                    0.5,
+                    TIME_STEP
+                );
+
+            if (!ok1 || !ok2)
+            {
+                Serial.println("Zero position trajectory ERROR");
+
+                stateSwitch = 99;
+                break;
+            }
+
+            trajectory_generator1.convertToSteps();
+            trajectory_generator2.convertToSteps();
+
+            motion_executor1.setTimeStep(TIME_STEP);
+            motion_executor2.setTimeStep(TIME_STEP);
+
+            motion_executor1.start(
+                trajectory_generator1.takeStepTrajectory(),
+                TIME_STEP
+            );
+
+            motion_executor2.start(
+                trajectory_generator2.takeStepTrajectory(),
+                TIME_STEP
+            );
+
+            Serial.println("Zero position move started");
+
             stateSwitch = 3;
+            break;
+        }
+
+
+        // ==================================================
+        // 3 - CZEKAMY AŻ DOJEDZIE DO POZYCJI 0
+        // ==================================================
+        case 3:
+        {
+            if (!motion_executor1.isActive() &&
+                !motion_executor2.isActive())
+            {
+                Serial.println("Zero position reached");
+
+                // Teraz zakładamy:
+                // aktualna pozycja XY = (0,0)
+
+                if (motionManager.planA2B(
+                        0.0,
+                        0.0,
+                        -50.0,
+                        50.0,
+                        2.0,
+                        TIME_STEP
+                    ))
+                {
+                    Serial.println(
+                        "A2B (0,0) -> (-50,50) requested"
+                    );
+
+                    stateSwitch = 4;
+                }
+                else
+                {
+                    Serial.println("A2B request ERROR");
+
+                    stateSwitch = 99;
+                }
+            }
+
+            break;
+        }
+
+
+        // ==================================================
+        // 4 - CZEKAMY AŻ A2B ZOSTANIE POLICZONE
+        // ==================================================
+        case 4:
+        {
+            if (motionManager.isTrajectoryReady())
+            {
+                if (!motionManager.startPreparedMotion())
+                {
+                    Serial.println("A2B start ERROR");
+
+                    stateSwitch = 99;
+                    break;
+                }
+
+                Serial.println(
+                    "A2B (0,0) -> (-50,50) started"
+                );
+
+                // W czasie gdy A2B jedzie,
+                // drugi rdzeń liczy następny ruch:
+                //
+                // (-50,50) -> (0,0)
+
+                if (!motionManager.planLine(
+                        -50.0,
+                        50.0,
+                        0.0,
+                        0.0,
+                        LINE_SPEED,
+                        TIME_STEP
+                    ))
+                {
+                    Serial.println("LINE 1 request ERROR");
+
+                    stateSwitch = 99;
+                    break;
+                }
+
+                Serial.println(
+                    "LINE 1 (-50,50) -> (0,0) requested"
+                );
+
+                stateSwitch = 5;
+            }
+
+            break;
+        }
+
+
+        // ==================================================
+        // 5 - A2B SKOŃCZONE -> START LINE 1
+        // ==================================================
+        case 5:
+        {
+            if (!motion_executor1.isActive() &&
+                !motion_executor2.isActive() &&
+                motionManager.isTrajectoryReady())
+            {
+                if (!motionManager.startPreparedMotion())
+                {
+                    Serial.println("LINE 1 start ERROR");
+
+                    stateSwitch = 99;
+                    break;
+                }
+
+                Serial.println(
+                    "LINE 1 (-50,50) -> (0,0) started"
+                );
+
+                // Podczas LINE 1 liczymy LINE 2:
+                //
+                // (0,0) -> (50,-50)
+
+                if (!motionManager.planLine(
+                        0.0,
+                        0.0,
+                        50.0,
+                        -50.0,
+                        LINE_SPEED,
+                        TIME_STEP
+                    ))
+                {
+                    Serial.println("LINE 2 request ERROR");
+
+                    stateSwitch = 99;
+                    break;
+                }
+
+                Serial.println(
+                    "LINE 2 (0,0) -> (50,-50) requested"
+                );
+
+                stateSwitch = 6;
+            }
+
+            break;
+        }
+
+
+        // ==================================================
+        // 6 - LINE 1 SKOŃCZONE -> START LINE 2
+        // ==================================================
+        case 6:
+        {
+            if (!motion_executor1.isActive() &&
+                !motion_executor2.isActive() &&
+                motionManager.isTrajectoryReady())
+            {
+                if (!motionManager.startPreparedMotion())
+                {
+                    Serial.println("LINE 2 start ERROR");
+
+                    stateSwitch = 99;
+                    break;
+                }
+
+                Serial.println(
+                    "LINE 2 (0,0) -> (50,-50) started"
+                );
+
+                stateSwitch = 7;
+            }
+
+            break;
+        }
+
+
+        // ==================================================
+        // 7 - CZEKAMY NA KONIEC
+        // ==================================================
+        case 7:
+        {
+            if (!motion_executor1.isActive() &&
+                !motion_executor2.isActive())
+            {
+                Serial.println("Sequence finished");
+
+                stateSwitch = 8;
+            }
+
+            break;
+        }
+
+
+        // ==================================================
+        // 8 - KONIEC, NIC NIE ROBIMY
+        // ==================================================
+        case 8:
+        {
+            break;
+        }
+
+
+        // ==================================================
+        // 99 - BŁĄD
+        // ==================================================
+        case 99:
+        {
+            motor1.stop();
+            motor2.stop();
+
+            motion_executor1.stop();
+            motion_executor2.stop();
+
+            break;
+        }
     }
-
-    if (stateSwitch == 3 &&
-        !homingMotor2.isActive() &&
-        !motion_executor2.isActive()) {
-            motionManager.line(
-            0,
-            0,
-            50,
-            -50,
-            50);
-            stateSwitch = 0;
-    }
-
-
 }
-
 // m2 sine 90 0.1 60 0.01
 // m2 trapeze 720 3 1.5 0.005
 // m2 rms 20

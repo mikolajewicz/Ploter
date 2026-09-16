@@ -66,15 +66,24 @@ bool MotionManager::A2B(
     trajectoryGenerator1.convertToSteps();
     trajectoryGenerator2.convertToSteps();
 
-    nextTrajectory1 =
-        trajectoryGenerator1.takeStepTrajectory();
+    std::vector<int> prepared1 =
+    trajectoryGenerator1.takeStepTrajectory();
 
-    nextTrajectory2 =
+    std::vector<int> prepared2 =
         trajectoryGenerator2.takeStepTrajectory();
 
-    nextTimeStep = timeStep;
+    xSemaphoreTake(
+        trajectoryMutex,
+        portMAX_DELAY
+    );
 
+    nextTrajectory1 = std::move(prepared1);
+    nextTrajectory2 = std::move(prepared2);
+
+    nextTimeStep = timeStep;
     trajectoryReady = true;
+
+    xSemaphoreGive(trajectoryMutex);
 
     return true;
 }
@@ -101,41 +110,243 @@ bool MotionManager::line(
             return false;
         }
 
-        nextTrajectory1 =
-            trajectoryGenerator1.takeStepTrajectory();
+        std::vector<int> prepared1 =
+        trajectoryGenerator1.takeStepTrajectory();
 
-        nextTrajectory2 =
+        std::vector<int> prepared2 =
             trajectoryGenerator2.takeStepTrajectory();
 
-        nextTimeStep = timeStep;
+        xSemaphoreTake(
+            trajectoryMutex,
+            portMAX_DELAY
+        );
 
+        nextTrajectory1 = std::move(prepared1);
+        nextTrajectory2 = std::move(prepared2);
+
+        nextTimeStep = timeStep;
         trajectoryReady = true;
+
+        xSemaphoreGive(trajectoryMutex);
 
 return true;
 }
 
 bool MotionManager::startPreparedMotion()
 {
+    std::vector<int> trajectory1;
+    std::vector<int> trajectory2;
+
+    double timeStep;
+
+    xSemaphoreTake(
+        trajectoryMutex,
+        portMAX_DELAY
+    );
+
     if (!trajectoryReady) {
+        xSemaphoreGive(trajectoryMutex);
         return false;
     }
 
+    trajectory1 = std::move(nextTrajectory1);
+    trajectory2 = std::move(nextTrajectory2);
+
+    timeStep = nextTimeStep;
+
+    trajectoryReady = false;
+
+    xSemaphoreGive(trajectoryMutex);
+
     motionExecutor1.start(
-        std::move(nextTrajectory1),
-        nextTimeStep
+        std::move(trajectory1),
+        timeStep
     );
 
     motionExecutor2.start(
-        std::move(nextTrajectory2),
-        nextTimeStep
+        std::move(trajectory2),
+        timeStep
     );
-
-    trajectoryReady = false;
 
     return true;
 }
 
-bool MotionManager::isTrajectoryReady() const
+bool MotionManager::isTrajectoryReady()
 {
-    return trajectoryReady;
+    xSemaphoreTake(
+        trajectoryMutex,
+        portMAX_DELAY
+    );
+
+    bool ready = trajectoryReady;
+
+    xSemaphoreGive(trajectoryMutex);
+
+    return ready;
 }
+
+bool MotionManager::beginPlanner()
+{
+    motionQueue = xQueueCreate(
+        4,
+        sizeof(MotionRequest)
+    );
+
+    if (motionQueue == nullptr) {
+        return false;
+    }
+
+    trajectoryMutex = xSemaphoreCreateMutex();
+
+    if (trajectoryMutex == nullptr) {
+        return false;
+    }
+
+    BaseType_t result = xTaskCreatePinnedToCore(
+        plannerTaskEntry,
+        "MotionPlanner",
+        8192,
+        this,
+        1,
+        &plannerTaskHandle,
+        0
+    );
+
+    return result == pdPASS;
+}
+
+void MotionManager::plannerTaskEntry(void* parameter)
+{
+    MotionManager* manager =
+        static_cast<MotionManager*>(parameter);
+
+    manager->plannerTask();
+}
+
+void MotionManager::plannerTask()
+{
+    MotionRequest request;
+
+    while (true)
+    {
+        if (xQueueReceive(
+                motionQueue,
+                &request,
+                portMAX_DELAY
+            ) != pdTRUE)
+        {
+            continue;
+        }
+
+        bool success = false;
+
+        switch (request.type)
+        {
+            case MotionType::A2B:
+                success = A2B(
+                    request.pointA_x,
+                    request.pointA_y,
+                    request.pointB_x,
+                    request.pointB_y,
+                    request.value,
+                    request.timeStep
+                );
+                break;
+
+            case MotionType::LINE:
+                success = line(
+                    request.pointA_x,
+                    request.pointA_y,
+                    request.pointB_x,
+                    request.pointB_y,
+                    request.value,
+                    request.timeStep
+                );
+                break;
+        }
+
+        if (!success)
+        {
+            Serial.println("Motion planning failed");
+        }
+    }
+}
+
+bool MotionManager::planA2B(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double time,
+    double timeStep
+)
+{
+    if (motionQueue == nullptr) {
+        return false;
+    }
+
+    MotionRequest request;
+
+    request.type = MotionType::A2B;
+
+    request.pointA_x = pointA_x;
+    request.pointA_y = pointA_y;
+
+    request.pointB_x = pointB_x;
+    request.pointB_y = pointB_y;
+
+    request.value = time;
+    request.timeStep = timeStep;
+
+    return xQueueSend(
+        motionQueue,
+        &request,
+        0
+    ) == pdTRUE;
+}
+
+bool MotionManager::planLine(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double speed,
+    double timeStep
+)
+{
+    if (motionQueue == nullptr) {
+        return false;
+    }
+
+    MotionRequest request;
+
+    request.type = MotionType::LINE;
+
+    request.pointA_x = pointA_x;
+    request.pointA_y = pointA_y;
+
+    request.pointB_x = pointB_x;
+    request.pointB_y = pointB_y;
+
+    request.value = speed;
+    request.timeStep = timeStep;
+
+    return xQueueSend(
+        motionQueue,
+        &request,
+        0
+    ) == pdTRUE;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
