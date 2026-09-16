@@ -145,7 +145,7 @@ void TrajectoryGenerator::convertToSteps() {
     }
 }  
 
-void TrajectoryGenerator::setTrajectory(
+void TrajectoryGenerator::takeTrajectory(
     std::vector<double>&& newTrajectory
 ){
     trajectoryPoints = std::move(newTrajectory);

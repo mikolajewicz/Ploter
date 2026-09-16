@@ -32,39 +32,51 @@ MotionManager::MotionManager(
 }
 
 bool MotionManager::A2B(
-    double pointA_x, 
-    double pointA_y, 
-    double pointB_x, 
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
     double pointB_y,
     double time,
     double timeStep
-){   
-        if (!solver.A2B(
+)
+{
+    if (!solver.A2B(
             pointA_x,
             pointA_y,
             pointB_x,
             pointB_y,
             time,
-            timeStep)
-        ) {
-            return false;
-        }
+            timeStep
+        )) {
+        return false;
+    }
 
-        if (!solver.compute()) {
-            return false;
-        }
-        trajectoryGenerator1.setTrajectory(solver.takeMotor1Trajectory());
-        trajectoryGenerator2.setTrajectory(solver.takeMotor2Trajectory());
+    if (!solver.compute()) {
+        return false;
+    }
 
-        trajectoryGenerator1.convertToSteps();
-        trajectoryGenerator2.convertToSteps();
+    trajectoryGenerator1.takeTrajectory(
+        solver.takeMotor1Trajectory()
+    );
 
-        motionExecutor1.setTimeStep(timeStep);
-        motionExecutor1.start(trajectoryGenerator1.takeStepTrajectory(), timeStep);
+    trajectoryGenerator2.takeTrajectory(
+        solver.takeMotor2Trajectory()
+    );
 
-        motionExecutor2.setTimeStep(timeStep);
-        motionExecutor2.start(trajectoryGenerator2.takeStepTrajectory(), timeStep);
-        return true;
+    trajectoryGenerator1.convertToSteps();
+    trajectoryGenerator2.convertToSteps();
+
+    nextTrajectory1 =
+        trajectoryGenerator1.takeStepTrajectory();
+
+    nextTrajectory2 =
+        trajectoryGenerator2.takeStepTrajectory();
+
+    nextTimeStep = timeStep;
+
+    trajectoryReady = true;
+
+    return true;
 }
 
 bool MotionManager::line(
@@ -89,16 +101,41 @@ bool MotionManager::line(
             return false;
         }
 
-        trajectoryGenerator1.setTrajectory(solver.takeMotor1Trajectory());
-        trajectoryGenerator2.setTrajectory(solver.takeMotor2Trajectory());
+        nextTrajectory1 =
+            trajectoryGenerator1.takeStepTrajectory();
 
-        trajectoryGenerator1.convertToSteps();
-        trajectoryGenerator2.convertToSteps();
+        nextTrajectory2 =
+            trajectoryGenerator2.takeStepTrajectory();
 
-        motionExecutor1.setTimeStep(timeStep);
-        motionExecutor1.start(trajectoryGenerator1.takeStepTrajectory(), timeStep);
+        nextTimeStep = timeStep;
 
-        motionExecutor2.setTimeStep(timeStep);
-        motionExecutor2.start(trajectoryGenerator2.takeStepTrajectory(), timeStep);
-        return true;
+        trajectoryReady = true;
+
+return true;
+}
+
+bool MotionManager::startPreparedMotion()
+{
+    if (!trajectoryReady) {
+        return false;
+    }
+
+    motionExecutor1.start(
+        std::move(nextTrajectory1),
+        nextTimeStep
+    );
+
+    motionExecutor2.start(
+        std::move(nextTrajectory2),
+        nextTimeStep
+    );
+
+    trajectoryReady = false;
+
+    return true;
+}
+
+bool MotionManager::isTrajectoryReady() const
+{
+    return trajectoryReady;
 }

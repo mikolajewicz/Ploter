@@ -33,6 +33,8 @@ public:
         trajectory.clear();
     }
 
+    
+
 private:
     std::vector<int> trajectory;
 

@@ -1,12 +1,19 @@
 #pragma once
 
+#include <TMCStepper.h>
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+#include <freertos/semphr.h>
+
 #include "MotorDriver.hpp"
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
 #include "Kinematics.hpp"
 
-#include <TMCStepper.h>
+
 
 class MotionManager
 {
@@ -24,6 +31,40 @@ private:
     Homing& homing2;
 
     Kinematics& solver;
+
+    std::vector<int> nextTrajectory1;
+    std::vector<int> nextTrajectory2;
+
+    double nextTimeStep = 0.01;
+
+    bool trajectoryReady = false;
+
+    enum class MotionType
+    {
+        A2B,
+        LINE
+    };
+
+    struct MotionRequest{
+        MotionType type;
+
+        double pointA_x;
+        double pointA_y;
+
+        double pointB_x;
+        double pointB_y;
+
+        double value;    // A2B  -> time, LINE -> speed
+
+        double timeStep;
+    };
+
+    QueueHandle_t motionQueue = nullptr;
+    TaskHandle_t plannerTaskHandle = nullptr;
+    SemaphoreHandle_t trajectoryMutex = nullptr;
+
+    static void plannerTaskEntry(void* parameter);
+    void plannerTask();
 
 public:
     MotionManager(
@@ -58,4 +99,28 @@ public:
         double pointB_y,
         double speed, // mm/s
         double timeStep = 0.01);
+
+    bool startPreparedMotion();
+
+    bool isTrajectoryReady() const;
+
+    bool beginPlanner();
+
+bool planA2B(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double time,
+    double timeStep
+);
+
+bool planLine(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double speed,
+    double timeStep
+);
 };

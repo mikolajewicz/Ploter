@@ -30,7 +30,7 @@ public:
 
     bool trapezoidalProfile(double distance, double time, double acceleration, double timeStep);
 
-    void setTrajectory(std::vector<double>&& trajectoryPoints);
+    void takeTrajectory(std::vector<double>&& trajectoryPoints);
 
     std::vector<int> takeStepTrajectory() {
         return std::move(stepTrajectory);
