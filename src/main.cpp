@@ -15,7 +15,7 @@
 
 
 constexpr double TIME_STEP = 0.01;
-constexpr double LINE_SPEED = 50.0;
+constexpr double LINE_SPEED = 100.0;
 
 constexpr unsigned int stepsPerRevolution = 4 * 16 * 400;
 
@@ -308,6 +308,9 @@ void loop()
                 Serial.println("Both motors homed");
 
                 stateSwitch = 2;
+
+                // tmc1.rms_current(1000);
+                // tmc2.rms_current(1000);
             }
 
             break;
