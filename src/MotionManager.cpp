@@ -88,50 +88,6 @@ bool MotionManager::A2B(
     return true;
 }
 
-bool MotionManager::line(
-    double pointA_x, 
-    double pointA_y, 
-    double pointB_x, 
-    double pointB_y,
-    double speed,
-    double timeStep){
-        if (!solver.line(
-            pointA_x,
-            pointA_y,
-            pointB_x,
-            pointB_y,
-            speed,
-            timeStep)
-        ) {
-            return false;
-        }
-
-        if (!solver.compute()) {
-            return false;
-        }
-
-        std::vector<int> prepared1 =
-        trajectoryGenerator1.takeStepTrajectory();
-
-        std::vector<int> prepared2 =
-            trajectoryGenerator2.takeStepTrajectory();
-
-        xSemaphoreTake(
-            trajectoryMutex,
-            portMAX_DELAY
-        );
-
-        nextTrajectory1 = std::move(prepared1);
-        nextTrajectory2 = std::move(prepared2);
-
-        nextTimeStep = timeStep;
-        trajectoryReady = true;
-
-        xSemaphoreGive(trajectoryMutex);
-
-return true;
-}
-
 bool MotionManager::startPreparedMotion()
 {
     std::vector<int> trajectory1;
@@ -263,6 +219,8 @@ void MotionManager::plannerTask()
                     request.timeStep
                 );
                 break;
+
+                
         }
 
         if (!success)
@@ -305,6 +263,69 @@ bool MotionManager::planA2B(
     ) == pdTRUE;
 }
 
+bool MotionManager::line(
+    double Ax,
+    double Ay,
+    double Bx,
+    double By,
+    double speed,
+    double timeStep
+)
+{
+    if (!solver.line(
+            Ax,
+            Ay,
+            Bx,
+            By,
+            speed,
+            timeStep
+        ))
+    {
+        Serial.println("solver.line FAILED");
+        return false;
+    }
+
+    if (!solver.compute())
+    {
+        Serial.println("solver.compute FAILED");
+        return false;
+    }
+
+    trajectoryGenerator1.takeTrajectory(
+        solver.takeMotor1Trajectory()
+    );
+
+    trajectoryGenerator2.takeTrajectory(
+        solver.takeMotor2Trajectory()
+    );
+
+    trajectoryGenerator1.convertToSteps();
+    trajectoryGenerator2.convertToSteps();
+
+    std::vector<int> prepared1 =
+        trajectoryGenerator1.takeStepTrajectory();
+
+    std::vector<int> prepared2 =
+        trajectoryGenerator2.takeStepTrajectory();
+
+    xSemaphoreTake(
+        trajectoryMutex,
+        portMAX_DELAY
+    );
+
+    nextTrajectory1 = std::move(prepared1);
+    nextTrajectory2 = std::move(prepared2);
+
+    nextTimeStep = timeStep;
+    trajectoryReady = true;
+
+    xSemaphoreGive(trajectoryMutex);
+
+    Serial.println("LINE READY");
+
+    return true;
+}
+
 bool MotionManager::planLine(
     double pointA_x,
     double pointA_y,
@@ -324,7 +345,6 @@ bool MotionManager::planLine(
 
     request.pointA_x = pointA_x;
     request.pointA_y = pointA_y;
-
     request.pointB_x = pointB_x;
     request.pointB_y = pointB_y;
 
@@ -337,8 +357,6 @@ bool MotionManager::planLine(
         0
     ) == pdTRUE;
 }
-
-
 
 
 
