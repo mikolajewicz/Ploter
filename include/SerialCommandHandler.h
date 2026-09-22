@@ -7,12 +7,11 @@
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
-#include "Kinematics.hpp"
 
-// Forward declaration to avoid including MotionManager header here
 class MotionManager;
 
-class SerialCommandHandler {
+class SerialCommandHandler
+{
 private:
     MotorDriver* motors_[2];
     TMC2209Stepper* tmcs_[2];
@@ -20,10 +19,9 @@ private:
     TrajectoryGenerator* trajectoryGenerators_[2];
     Homing* homings_[2];
 
-    uint8_t selectedMotor_ = 0;
+    MotionManager& motionManager;
 
     String serialCommand_;
-
     bool stopped_ = false;
 
     bool parseLongArgument(
@@ -36,9 +34,28 @@ private:
         double& result
     );
 
-    void handleSerialCommand(String line);
+    void handleSerialCommand(
+        String line
+    );
 
-    MotionManager& motionManager;
+    void handleMotorCommand(
+        uint8_t motorIndex,
+        String line
+    );
+
+    void handleTabletCommand(
+        const String& line
+    );
+
+     void handleMotionCommand(
+        String line
+    );
+
+    void updatePendingMotion();
+
+    bool motionCommandPending_ = false;
+    uint32_t motionCommandQueuedAt_ = 0;
+
 public:
     SerialCommandHandler(
         MotorDriver& motor1,
@@ -59,7 +76,15 @@ public:
     void readSerialCommands();
 
     void printHelp();
-    void printStatus();
+
+    void printStatus(
+        uint8_t motorNumber
+    );
+
+    void stopAll();
+
+    // Na razie zostawiamy stare funkcje.
+    // Posprzatamy je w kolejnym kroku.
 
     bool trapeze(
         uint8_t motor,
@@ -76,8 +101,6 @@ public:
         double duration,
         double timeStep
     );
-
-    void stopAll();
 
     bool A2B(
         double pointA_x,
@@ -96,7 +119,4 @@ public:
         double speed,
         double timeStep
     );
-
-    void handleTabletCommand(const String& line);
-
 };
