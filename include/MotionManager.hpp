@@ -68,6 +68,16 @@ private:
     static void plannerTaskEntry(void* parameter);
     void plannerTask();
 
+    double liveTargetX = 0.0;
+    double liveTargetY = 0.0;
+
+    double livePressure = 0.0;
+
+    bool liveTargetInside = false;
+    bool liveTargetReceived = false;
+
+    uint32_t liveTargetLastUpdate = 0;
+
 public:
     MotionManager(
         MotorDriver& motor1,
@@ -115,7 +125,7 @@ public:
         double pointB_y,
         double time,
         double timeStep
-);
+    );
 
     bool planLine(
     double pointA_x,
@@ -124,5 +134,12 @@ public:
     double pointB_y,
     double speed,
     double timeStep
-);
+    );
+
+    void setLiveTarget(
+        double x,
+        double y,
+        double pressure,
+        bool inside
+    );
 };

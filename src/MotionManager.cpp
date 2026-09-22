@@ -356,6 +356,25 @@ bool MotionManager::planLine(
         &request,
         0
     ) == pdTRUE;
+
+}
+
+void MotionManager::setLiveTarget(
+    double x,
+    double y,
+    double pressure,
+    bool inside
+)
+{
+    liveTargetX = x;
+    liveTargetY = y;
+
+    livePressure = pressure;
+
+    liveTargetInside = inside;
+    liveTargetReceived = true;
+
+    liveTargetLastUpdate = millis();
 }
 
 

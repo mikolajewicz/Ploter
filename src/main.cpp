@@ -262,6 +262,9 @@ bool motor2Homed = false;
 
 void loop()
 {
+
+    serialCommandHandler.readSerialCommands();
+
     motor1.run();
     motor2.run();
 

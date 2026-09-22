@@ -97,4 +97,6 @@ public:
         double timeStep
     );
 
+    void handleTabletCommand(const String& line);
+
 };

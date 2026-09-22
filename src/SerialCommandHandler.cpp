@@ -882,6 +882,38 @@ bool SerialCommandHandler::line(
     );
 }
 
+void SerialCommandHandler::handleTabletCommand(
+    const String& line
+)
+{
+    double x;
+    double y;
+    double pressure;
+    int inside;
+
+    int parsed = sscanf(
+        line.c_str(),
+        "tablet %lf %lf %lf %d",
+        &x,
+        &y,
+        &pressure,
+        &inside
+    );
+
+    if (parsed != 4)
+    {
+        Serial.println("ERR tablet");
+        return;
+    }
+
+    motionManager.setLiveTarget(
+        x,
+        y,
+        pressure,
+        inside != 0
+    );
+}
+
 void SerialCommandHandler::stopAll()
 {
     motionExecutors_[0]->stop();
