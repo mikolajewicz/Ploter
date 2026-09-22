@@ -278,12 +278,12 @@ def on_motion(cursor, x, y, pressure, *args):
         MARGIN_MM <= y_mm <= A4_HEIGHT_MM - MARGIN_MM
     )
 
-    # send_tablet_position(
-    #     x_mm,
-    #     y_mm,
-    #     pressure,
-    #     inside_page
-    # )
+    send_tablet_position(
+        x_mm,
+        y_mm,
+        pressure,
+        inside_page
+    )
 
     # ----------------------------------------------
     # Tekst na ekranie

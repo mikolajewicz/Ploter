@@ -35,7 +35,7 @@ private:
 
     Kinematics& solver;
 
-    PenController pen;
+    PenController& pen;
 
     std::vector<int> nextTrajectory1;
     std::vector<int> nextTrajectory2;

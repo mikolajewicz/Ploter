@@ -258,6 +258,7 @@ Serial1.begin(
     }
 
     pen.begin();
+
 }
 
 // --------------------------------------------------
@@ -279,8 +280,6 @@ void loop()
 
     motion_executor1.update();
     motion_executor2.update();
-
-    
 
     // switch (stateSwitch)
     // {
