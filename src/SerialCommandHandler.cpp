@@ -160,6 +160,14 @@ void SerialCommandHandler::handleSerialCommand(String line) {
     String globalCommand = line;
     globalCommand.toLowerCase();
 
+    if (
+        globalCommand == "tablet" ||
+        globalCommand.startsWith("tablet ")
+    ) {
+        handleTabletCommand(line);
+        return;
+    }
+
     if (globalCommand == "stop") {
         stopAll();
         Serial.println("ALL STOPPED");

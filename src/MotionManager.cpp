@@ -13,7 +13,9 @@ MotionManager::MotionManager(
     TrajectoryGenerator& trajectoryGenerator2,
     Homing& homing2,
 
-    Kinematics& solver
+    Kinematics& solver,
+
+    PenController& pen
 )
     : motor1(motor1),
       tmc1(tmc1),
@@ -27,7 +29,8 @@ MotionManager::MotionManager(
       trajectoryGenerator2(trajectoryGenerator2),
       homing2(homing2),
 
-      solver(solver)
+      solver(solver),
+      pen(pen)
 {
 }
 
@@ -370,11 +373,18 @@ void MotionManager::setLiveTarget(
     liveTargetY = y;
 
     livePressure = pressure;
-
     liveTargetInside = inside;
-    liveTargetReceived = true;
 
+    liveTargetReceived = true;
     liveTargetLastUpdate = millis();
+
+    if (!inside)
+    {
+        pen.up();
+        return;
+    }
+
+    pen.setPressure(pressure);
 }
 
 

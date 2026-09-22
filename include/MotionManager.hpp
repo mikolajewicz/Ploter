@@ -12,6 +12,7 @@
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
 #include "Kinematics.hpp"
+#include "PenController.hpp"
 
 #include <vector>
 
@@ -33,6 +34,8 @@ private:
     Homing& homing2;
 
     Kinematics& solver;
+
+    PenController pen;
 
     std::vector<int> nextTrajectory1;
     std::vector<int> nextTrajectory2;
@@ -92,7 +95,9 @@ public:
         TrajectoryGenerator& trajectoryGenerator2,
         Homing& homing2,
 
-        Kinematics& solver
+        Kinematics& solver,
+
+        PenController& pen
     );
 
     bool A2B(

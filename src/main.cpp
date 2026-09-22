@@ -8,11 +8,15 @@
 #include "Homing.hpp"
 #include "Kinematics.hpp"
 #include "MotionManager.hpp"
+#include "PenController.hpp"
 
 // --------------------------------------------------
 // Konfiguracja TMC2209
 // --------------------------------------------------
 
+
+
+constexpr int SERVO_PIN = 23;
 
 constexpr double TIME_STEP = 0.01;
 constexpr double LINE_SPEED = 100.0;
@@ -130,6 +134,12 @@ Kinematics Solver;
 // Obiekt obsługi komend szeregowych
 // --------------------------------------------------
 
+PenController pen(
+    SERVO_PIN,
+    60,     // góra
+    90      // dół
+);
+
 MotionManager motionManager(
     motor1,
     tmc1,
@@ -143,7 +153,8 @@ MotionManager motionManager(
     trajectory_generator2,
     homingMotor2,
 
-    Solver
+    Solver,
+    pen
 );
 
 SerialCommandHandler serialCommandHandler(
@@ -161,10 +172,6 @@ SerialCommandHandler serialCommandHandler(
 
     motionManager
 );
-
-
-
-
 
 // --------------------------------------------------
 // setup
@@ -249,6 +256,8 @@ Serial1.begin(
     if (!motionManager.beginPlanner()) {
     Serial.println("Planner ERROR");
     }
+
+    pen.begin();
 }
 
 // --------------------------------------------------
