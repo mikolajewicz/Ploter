@@ -1227,4 +1227,6 @@ void SerialCommandHandler::stopAll()
     motors_[1]->stop();
 
     stopped_ = true;
+
+    motionCommandPending_ = false;
 }
