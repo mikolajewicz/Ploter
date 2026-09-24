@@ -152,6 +152,8 @@ void updateHomeSequence(
     bool homing2Finished
 );
 
+int64_t angleToSteps(double angle);
+
 Kinematics Solver;
 
 // --------------------------------------------------
@@ -417,15 +419,17 @@ void updateHomeSequence(
                 );
 
                 homeState = 4;
+
+                motor1.setStepCount(
+                    angleToSteps(HOME_ANGLE_M1)
+                );
+
+                motor2.setStepCount(
+                    angleToSteps(HOME_ANGLE_M2)
+                );
             }
 
-            motor1.setStepCount(
-                angleToSteps(HOME_ANGLE_M1)
-            );
-
-            motor2.setStepCount(
-                angleToSteps(HOME_ANGLE_M2)
-            );
+            
 
             break;
         }

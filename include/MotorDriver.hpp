@@ -36,7 +36,7 @@ public:
     void step();
 
     int64_t getStepCount(){ return stepCount; }
-    void setStepCount(int newStepCount){ stepCount = newStepCount;}
+    void setStepCount(int64_t newStepCount){ stepCount = newStepCount;}
     void resetStepCount()
     {
         stepCount = 0;

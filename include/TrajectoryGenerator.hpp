@@ -35,6 +35,8 @@ public:
     std::vector<int> takeStepTrajectory() {
         return std::move(stepTrajectory);
     }
+
+    unsigned int getStepsPerRev(){ return stepsPerRevolution; }
 };
 
 

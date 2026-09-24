@@ -151,7 +151,7 @@ public:
         bool inside
     );
 
-    bool calcualateCurrentPosition();
+    bool calculateCurrentPosition();
     double getCurrentX(){ return current_x; }
     double getCurrentY(){ return current_y; }
 };
