@@ -17,6 +17,9 @@
 constexpr double HOME_OFFSET_M1 = 99.0;
 constexpr double HOME_OFFSET_M2 = -53.0;
 
+constexpr double HOME_ANGLE_M1 = 141.9;
+constexpr double HOME_ANGLE_M2 = 38.1;
+
 constexpr double HOME_OFFSET_TIME = 2.0;
 constexpr double HOME_OFFSET_ACCEL_TIME = 0.5;
 
@@ -416,6 +419,14 @@ void updateHomeSequence(
                 homeState = 4;
             }
 
+            motor1.setStepCount(
+                angleToSteps(HOME_ANGLE_M1)
+            );
+
+            motor2.setStepCount(
+                angleToSteps(HOME_ANGLE_M2)
+            );
+
             break;
         }
 
@@ -459,3 +470,22 @@ void startHomeSequence()
 
     Serial.println("HOME sequence started");
 }
+
+int64_t angleToSteps(double angle)
+{
+    return llround(
+        angle / 360.0 *
+        stepsPerRevolution
+    );
+}
+
+
+
+
+
+
+
+
+
+
+

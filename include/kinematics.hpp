@@ -38,10 +38,14 @@ public:
         double pointB_y,
         double speed, // mm/s
         double timeStep = 0.01);
+
+    bool forwardKinematics(double m1_angle, double m2_angle, double& x, double& y); // w stopniach
+
 private:
     std::vector<double> x_vect;
     std::vector<double> y_vect;
 
     std::vector<double> theta_1_vect;
     std::vector<double> theta_2_vect;
+    
 };

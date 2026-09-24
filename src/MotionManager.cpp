@@ -388,6 +388,19 @@ void MotionManager::setLiveTarget(
 }
 
 
+bool MotionManager::calcualateCurrentPosition(){
+    double m1_steps = motor1.getStepCount();
+    double m2_steps = motor2.getStepCount();
+
+    unsigned int stepsPerRev = trajectoryGenerator1.getStepsPerRev();
+
+    double m1_angle = m1_steps / stepsPerRev * 360;
+    double m2_angle = m2_steps / stepsPerRev * 360;
+
+    solver.forwardKinematics(m1_angle, m2_angle, current_x, current_y);
+}
+
+
 
 
 

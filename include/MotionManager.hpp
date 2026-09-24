@@ -81,6 +81,9 @@ private:
 
     uint32_t liveTargetLastUpdate = 0;
 
+    double current_x;
+    double current_y;
+
 public:
     MotionManager(
         MotorDriver& motor1,
@@ -147,4 +150,8 @@ public:
         double pressure,
         bool inside
     );
+
+    bool calcualateCurrentPosition();
+    double getCurrentX(){ return current_x; }
+    double getCurrentY(){ return current_y; }
 };

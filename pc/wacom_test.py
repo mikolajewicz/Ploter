@@ -5,6 +5,7 @@ import threading
 import time
 import serial
 
+
 # --------------------------------------------------
 # Kartka A4
 # --------------------------------------------------
@@ -30,8 +31,18 @@ ser = serial.Serial(
 
 serial_lock = threading.Lock()
 
-SEND_INTERVAL = 0.01   # 10 ms = maks. około 100 razy/s
+SEND_INTERVAL = 0.01
 last_send_time = 0.0
+
+
+def send_command(command):
+    message = command.strip() + "\n"
+
+    with serial_lock:
+        ser.write(message.encode("ascii"))
+
+    print("CMD:", command)
+
 
 def read_esp(dt):
     while ser.in_waiting > 0:
@@ -44,10 +55,34 @@ def read_esp(dt):
         if line:
             print("ESP:", line)
 
-pyglet.clock.schedule_interval(
-    read_esp,
-    0.01
-)          
+
+def console_input():
+    print()
+    print("================================")
+    print("Terminal plotera")
+    print("Wpisuj komendy i naciskaj ENTER")
+    print("================================")
+    print()
+
+    while True:
+        try:
+            command = input("> ").strip()
+
+            if command:
+                send_command(command)
+
+        except EOFError:
+            break
+
+        except Exception as e:
+            print("Terminal error:", e)
+
+
+threading.Thread(
+    target=console_input,
+    daemon=True
+).start()
+
 
 # --------------------------------------------------
 # Okno
@@ -56,7 +91,7 @@ pyglet.clock.schedule_interval(
 window = pyglet.window.Window(
     width=WINDOW_WIDTH,
     height=WINDOW_HEIGHT,
-    caption="Wacom A4",
+    caption="Ploter - Wacom / Terminal",
     resizable=False
 )
 
@@ -64,21 +99,31 @@ glClearColor(1.0, 1.0, 1.0, 1.0)
 
 
 # --------------------------------------------------
-# Tablet
+# Tablet - OPCJONALNY
 # --------------------------------------------------
 
 tablets = pyglet.input.get_tablets()
 
-if not tablets:
-    print("Nie znaleziono tabletu")
-    exit()
+tablet = None
+canvas = None
+tablet_available = False
 
-tablet = tablets[0]
 
-print("Znaleziono tablet:")
-print(tablet)
+if tablets:
+    tablet = tablets[0]
 
-canvas = tablet.open(window)
+    print("Znaleziono tablet:")
+    print(tablet)
+
+    canvas = tablet.open(window)
+
+    tablet_available = True
+
+else:
+    print()
+    print("Nie znaleziono tabletu.")
+    print("Terminal nadal działa.")
+    print()
 
 
 # --------------------------------------------------
@@ -93,6 +138,9 @@ lines = []
 last_x = None
 last_y = None
 
+last_x_mm = 0.0
+last_y_mm = 0.0
+
 PRESSURE_THRESHOLD = 0.01
 
 
@@ -100,12 +148,19 @@ PRESSURE_THRESHOLD = 0.01
 # Przeliczenie marginesu mm -> piksele
 # --------------------------------------------------
 
-margin_x_px = MARGIN_MM / A4_WIDTH_MM * WINDOW_WIDTH
-margin_y_px = MARGIN_MM / A4_HEIGHT_MM * WINDOW_HEIGHT
+margin_x_px = (
+    MARGIN_MM / A4_WIDTH_MM
+    * WINDOW_WIDTH
+)
+
+margin_y_px = (
+    MARGIN_MM / A4_HEIGHT_MM
+    * WINDOW_HEIGHT
+)
 
 
 # --------------------------------------------------
-# Ramka pokazująca margines
+# Ramka marginesu
 # --------------------------------------------------
 
 left = margin_x_px
@@ -117,32 +172,40 @@ top = WINDOW_HEIGHT - margin_y_px
 
 margin_lines = [
     shapes.Line(
-        left, bottom,
-        right, bottom,
+        left,
+        bottom,
+        right,
+        bottom,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
     ),
 
     shapes.Line(
-        right, bottom,
-        right, top,
+        right,
+        bottom,
+        right,
+        top,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
     ),
 
     shapes.Line(
-        right, top,
-        left, top,
+        right,
+        top,
+        left,
+        top,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
     ),
 
     shapes.Line(
-        left, top,
-        left, bottom,
+        left,
+        top,
+        left,
+        bottom,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
@@ -151,11 +214,22 @@ margin_lines = [
 
 
 # --------------------------------------------------
-# Tekst ze współrzędnymi
+# Tekst
 # --------------------------------------------------
 
+if tablet_available:
+    initial_text = (
+        "Tablet: OK | "
+        "X=0.0 mm Y=0.0 mm P=0.000"
+    )
+else:
+    initial_text = (
+        "Tablet: BRAK | terminal aktywny"
+    )
+
+
 position_label = pyglet.text.Label(
-    "X=0.0 mm   Y=0.0 mm   P=0.000",
+    initial_text,
     x=45,
     y=15,
     color=(0, 0, 0, 255)
@@ -194,7 +268,7 @@ clear_label = pyglet.text.Label(
 
 
 # --------------------------------------------------
-# Funkcja czyszcząca kartkę
+# Czyszczenie
 # --------------------------------------------------
 
 def clear_drawing():
@@ -212,7 +286,7 @@ def clear_drawing():
 
 
 # --------------------------------------------------
-# Kliknięcie przycisku
+# Kliknięcie
 # --------------------------------------------------
 
 @window.event
@@ -229,109 +303,180 @@ def on_mouse_press(x, y, button, modifiers):
 
 
 # --------------------------------------------------
-# Piórko weszło w zasięg
+# Wysyłanie pozycji tabletu
 # --------------------------------------------------
 
-@canvas.event
-def on_enter(cursor):
-    print("Piórko wykryte")
+def send_tablet_position(
+    x_mm,
+    y_mm,
+    pressure,
+    inside_page
+):
+    global last_send_time
 
+    now = time.monotonic()
 
-# --------------------------------------------------
-# Piórko wyszło z zasięgu
-# --------------------------------------------------
+    if now - last_send_time < SEND_INTERVAL:
+        return
 
-@canvas.event
-def on_leave(cursor):
-    global last_x, last_y
+    last_send_time = now
 
-    last_x = None
-    last_y = None
+    inside = 1 if inside_page else 0
 
-    print("Piórko poza zasięgiem")
-
-
-# --------------------------------------------------
-# Ruch pióra
-# --------------------------------------------------
-
-@canvas.event
-def on_motion(cursor, x, y, pressure, *args):
-
-    global last_x, last_y
-
-    # ----------------------------------------------
-    # piksele -> milimetry A4
-    # ----------------------------------------------
-
-    x_mm = x / (WINDOW_WIDTH - 1) * A4_WIDTH_MM
-    y_mm = y / (WINDOW_HEIGHT - 1) * A4_HEIGHT_MM
-
-
-    # ----------------------------------------------
-    # Czy jesteśmy wewnątrz marginesów?
-    # ----------------------------------------------
-
-    inside_page = (
-        MARGIN_MM <= x_mm <= A4_WIDTH_MM - MARGIN_MM
-        and
-        MARGIN_MM <= y_mm <= A4_HEIGHT_MM - MARGIN_MM
+    message = (
+        f"tablet "
+        f"{x_mm:.2f} "
+        f"{y_mm:.2f} "
+        f"{pressure:.3f} "
+        f"{inside}\n"
     )
 
-    send_tablet_position(
-        x_mm,
-        y_mm,
-        pressure,
-        inside_page
-    )
-
-    # ----------------------------------------------
-    # Tekst na ekranie
-    # ----------------------------------------------
-
-    if inside_page:
-        status = "OK"
-    else:
-        status = "POZA OBSZAREM"
-
-    position_label.text = (
-        f"X={x_mm:6.1f} mm   "
-        f"Y={y_mm:6.1f} mm   "
-        f"P={pressure:.3f}   "
-        f"{status}"
-    )
+    with serial_lock:
+        ser.write(
+            message.encode("ascii")
+        )
 
 
-    # ----------------------------------------------
-    # Rysowanie
-    # ----------------------------------------------
+# --------------------------------------------------
+# Obsługa tabletu
+# --------------------------------------------------
 
-    if pressure > PRESSURE_THRESHOLD and inside_page:
+if canvas is not None:
 
-        if last_x is not None and last_y is not None:
+    @canvas.event
+    def on_enter(cursor):
+        print("Piórko wykryte")
 
-            line = shapes.Line(
-                last_x,
-                last_y,
-                x,
-                y,
-                thickness=2,
-                color=(0, 0, 0),
-                batch=drawing_batch
-            )
 
-            lines.append(line)
-
-        last_x = x
-        last_y = y
-
-    else:
-
-        # Nie dotykamy albo jesteśmy w marginesie.
-        # Przerywamy aktualną linię.
+    @canvas.event
+    def on_leave(cursor):
+        global last_x
+        global last_y
 
         last_x = None
         last_y = None
+
+        # Powiedz ESP32, że pióro
+        # nie jest aktywne.
+        send_tablet_position(
+            last_x_mm,
+            last_y_mm,
+            0.0,
+            False
+        )
+
+        print("Piórko poza zasięgiem")
+
+
+    @canvas.event
+    def on_motion(
+        cursor,
+        x,
+        y,
+        pressure,
+        *args
+    ):
+        global last_x
+        global last_y
+
+        global last_x_mm
+        global last_y_mm
+
+        # ------------------------------------------
+        # piksele -> mm
+        # ------------------------------------------
+
+        x_mm = (
+            x /
+            (WINDOW_WIDTH - 1) *
+            A4_WIDTH_MM
+        )
+
+        y_mm = (
+            y /
+            (WINDOW_HEIGHT - 1) *
+            A4_HEIGHT_MM
+        )
+
+        last_x_mm = x_mm
+        last_y_mm = y_mm
+
+        # ------------------------------------------
+        # Obszar roboczy
+        # ------------------------------------------
+
+        inside_page = (
+            MARGIN_MM
+            <= x_mm
+            <= A4_WIDTH_MM - MARGIN_MM
+
+            and
+
+            MARGIN_MM
+            <= y_mm
+            <= A4_HEIGHT_MM - MARGIN_MM
+        )
+
+        # ------------------------------------------
+        # ESP32
+        # ------------------------------------------
+
+        send_tablet_position(
+            x_mm,
+            y_mm,
+            pressure,
+            inside_page
+        )
+
+        # ------------------------------------------
+        # Tekst
+        # ------------------------------------------
+
+        if inside_page:
+            status = "OK"
+        else:
+            status = "POZA OBSZAREM"
+
+        position_label.text = (
+            f"X={x_mm:6.1f} mm   "
+            f"Y={y_mm:6.1f} mm   "
+            f"P={pressure:.3f}   "
+            f"{status}"
+        )
+
+        # ------------------------------------------
+        # Rysowanie
+        # ------------------------------------------
+
+        if (
+            pressure > PRESSURE_THRESHOLD
+            and inside_page
+        ):
+
+            if (
+                last_x is not None
+                and last_y is not None
+            ):
+
+                line = shapes.Line(
+                    last_x,
+                    last_y,
+                    x,
+                    y,
+                    thickness=2,
+                    color=(0, 0, 0),
+                    batch=drawing_batch
+                )
+
+                lines.append(line)
+
+            last_x = x
+            last_y = y
+
+        else:
+
+            last_x = None
+            last_y = None
 
 
 # --------------------------------------------------
@@ -350,56 +495,18 @@ def on_draw():
     clear_label.draw()
 
 
-def send_command(command):
-    message = command.strip() + "\n"
-    
-    with serial_lock:
-        ser.write(message.encode("ascii"))
+# --------------------------------------------------
+# ESP32 RX
+# --------------------------------------------------
 
-    print("CMD:", command)
+pyglet.clock.schedule_interval(
+    read_esp,
+    0.01
+)
 
-
-def console_input():
-    while True:
-        command = input("> ").strip()
-
-        if command:
-            send_command(command)
-
-
-threading.Thread(
-    target=console_input,
-    daemon=True
-).start()
-
-
-def send_tablet_position(x_mm, y_mm, pressure, inside_page):
-    global last_send_time
-
-    now = time.monotonic()
-
-    # Nie wysyłaj częściej niż raz na 10 ms
-    if now - last_send_time < SEND_INTERVAL:
-        return
-
-    last_send_time = now
-
-    inside = 1 if inside_page else 0
-
-    message = (
-        f"tablet "
-        f"{x_mm:.2f} "
-        f"{y_mm:.2f} "
-        f"{pressure:.3f} "
-        f"{inside}\n"
-    )
-
-    with serial_lock:
-        ser.write(message.encode("ascii"))
 
 # --------------------------------------------------
-# Start programu
+# Start
 # --------------------------------------------------
 
 pyglet.app.run()
-

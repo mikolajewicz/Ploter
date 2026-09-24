@@ -35,10 +35,19 @@ public:
 
     void step();
 
+    int64_t getStepCount(){ return stepCount; }
+    void setStepCount(int newStepCount){ stepCount = newStepCount;}
+    void resetStepCount()
+    {
+        stepCount = 0;
+    }
+
 private:
     int stepPin;
     int dirPin;
     int enablePin;
+
+    int64_t stepCount = 0;
 
     uint32_t speedStepsPerSecond;
     uint32_t halfPeriodMicroseconds;

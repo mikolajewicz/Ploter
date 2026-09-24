@@ -30,10 +30,11 @@ bool Kinematics::compute()
     double A4_height = 297.0; // mm
     double margin = 10.0; // mm
 
+    double l1 = 180.0; // Length of the first arm segment
+    double l2 = 260.0; // Length of the second arm segment
+
     for (size_t i = 0; i < x_vect.size(); ++i)
     {
-        double l1 = 180.0; // Length of the first arm segment
-        double l2 = 260.0; // Length of the second arm segment
 
         double kx = x_vect[i];
         double ky = y_vect[i] + 150 + A4_height/2;
@@ -276,6 +277,71 @@ bool Kinematics::line(
         x_vect.push_back(pointB_x);
         y_vect.push_back(pointB_y);
     }
+
+    return true;
+}
+
+bool Kinematics::forwardKinematics(
+    double m1_angle,
+    double m2_angle,
+    double& x,
+    double& y
+)
+{
+    constexpr double l1 = 180.0;
+    constexpr double l2 = 260.0;
+    constexpr double d  = 150.0;
+
+    // stopnie -> radiany
+    double q1 = m1_angle * M_PI / 180.0;
+    double q2 = m2_angle * M_PI / 180.0;
+
+    // Punkt D
+    double rD_x = l1 * std::cos(q1) - d / 2.0;
+    double rD_y = l1 * std::sin(q1);
+
+    // Punkt C
+    double rC_x = l1 * std::cos(q2) + d / 2.0;
+    double rC_y = l1 * std::sin(q2);
+
+    // Środek odcinka CD
+    double S_CD_x = (rD_x + rC_x) / 2.0;
+    double S_CD_y = (rD_y + rC_y) / 2.0;
+
+    // Wektor D -> C
+    double CD_x = rC_x - rD_x;
+    double CD_y = rC_y - rD_y;
+
+    // Długość CD
+    double CD = std::sqrt(
+        CD_x * CD_x +
+        CD_y * CD_y
+    );
+
+    // Sprawdzenie, czy drugi człon może połączyć C i D
+    double hSquared =
+        l2 * l2 -
+        (CD / 2.0) * (CD / 2.0);
+
+    if (hSquared < 0.0)
+    {
+        return false;
+    }
+
+    double alpha = std::atan2(
+        CD_y,
+        CD_x
+    );
+
+    double h = std::sqrt(hSquared);
+
+    // Wektor prostopadły
+    double h_v_x = -h * std::sin(alpha);
+    double h_v_y =  h * std::cos(alpha);
+
+    // Punkt końcowy K
+    x = S_CD_x + h_v_x;
+    y = S_CD_y + h_v_y;
 
     return true;
 }
