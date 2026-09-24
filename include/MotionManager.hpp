@@ -84,6 +84,12 @@ private:
     double current_x;
     double current_y;
 
+    double current_speed = 0;
+
+    double line_vect_x = 0;
+    double line_vect_y = 0;
+
+
 public:
     MotionManager(
         MotorDriver& motor1,
@@ -154,4 +160,7 @@ public:
     bool calculateCurrentPosition();
     double getCurrentX(){ return current_x; }
     double getCurrentY(){ return current_y; }
+
+    bool followTarget();
 };
+

@@ -17,8 +17,8 @@
 constexpr double HOME_OFFSET_M1 = 99.0;
 constexpr double HOME_OFFSET_M2 = -53.0;
 
-constexpr double HOME_ANGLE_M1 = 141.9;
-constexpr double HOME_ANGLE_M2 = 38.1;
+constexpr double HOME_ANGLE_M1 = 141.866;
+constexpr double HOME_ANGLE_M2 = 180 - 141.866;
 
 constexpr double HOME_OFFSET_TIME = 2.0;
 constexpr double HOME_OFFSET_ACCEL_TIME = 0.5;

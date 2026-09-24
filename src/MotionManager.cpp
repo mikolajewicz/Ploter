@@ -397,9 +397,46 @@ bool MotionManager::calculateCurrentPosition(){
     double m1_angle = m1_steps / stepsPerRev * 360;
     double m2_angle = m2_steps / stepsPerRev * 360;
 
-    solver.forwardKinematics(m1_angle, m2_angle, current_x, current_y);
+    return solver.forwardKinematics(m1_angle, m2_angle, current_x, current_y);
 
-    return true;
+  
+}
+
+bool MotionManager::followTarget(){
+    double mass = 1;
+    double viscocity = 1;
+    double stiffness = 1;
+
+    double move_time = 0.1; 
+
+    double previous_distance = std::hypot(line_vect_x, line_vect_y);
+
+    double speed_x = current_speed * line_vect_x / previous_distance;
+    double speed_y = current_speed * line_vect_y / previous_distance;
+
+    double distance_x = liveTargetX - current_x;
+    double distance_y = liveTargetY - current_y;
+
+    int distance = std::hypot(distance_x, distance_y);
+
+    double acceleration_x = (- viscocity * speed_x - distance_x * stiffness) / mass;
+    double acceleration_y = (- viscocity * speed_y - distance_y * stiffness) / mass;
+
+    speed_x = speed_x + acceleration_x * move_time;
+    speed_y = speed_y + acceleration_y * move_time;
+    
+    current_speed = std::hypot(speed_x, speed_y);
+
+    double new_distance = current_speed * move_time;
+    double new_distance_x = speed_x * move_time;
+    double new_distance_y = speed_y * move_time;
+
+    line(current_x, 
+        current_y,
+        current_x + new_distance_x,
+        current_y + new_distance_y,
+        current_speed
+    );
 }
 
 

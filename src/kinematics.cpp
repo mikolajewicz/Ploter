@@ -26,8 +26,8 @@ bool Kinematics::compute()
     theta_1_vect.clear();
     theta_2_vect.clear();
 
-    double A4_width = 210.0; // mm
-    double A4_height = 297.0; // mm
+    double A4_width = 297.0;
+    double A4_height = 210.0;
     double margin = 10.0; // mm
 
     double l1 = 180.0; // Length of the first arm segment
@@ -341,7 +341,7 @@ bool Kinematics::forwardKinematics(
 
     // Punkt końcowy K
     x = S_CD_x + h_v_x;
-    y = S_CD_y + h_v_y;
+    y = S_CD_y + h_v_y - 298.5; //srodek kartki
 
     return true;
 }
