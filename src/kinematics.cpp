@@ -29,6 +29,7 @@ bool Kinematics::compute()
     double A4_width = 297.0;
     double A4_height = 210.0;
     double margin = 10.0; // mm
+    constexpr double tolerance = 0.5;
 
     double l1 = 180.0; // Length of the first arm segment
     double l2 = 260.0; // Length of the second arm segment
@@ -38,15 +39,6 @@ bool Kinematics::compute()
 
         double kx = x_vect[i];
         double ky = y_vect[i] + 150 + A4_height/2;
-
-        if (abs(kx) > A4_width/2 - margin || ky > 150 + A4_height - margin || ky < 150 + margin)
-        {
-            Serial.println(
-                "Invalid path point: (" + String(kx) + ", " + String(ky) + ")"
-            );
-            
-            return false;
-        }
 
         // współrzędne silników
         double xA = -75; double yA = 0;
@@ -61,8 +53,25 @@ bool Kinematics::compute()
         double beta1  = std::atan2(ky - yB, kx - xB);
        
         // Cosinusy do acos (prawo cosinusów)
-        double cA = (l1*l1 + a*a - l2*l2) / (2*l1*a);
-        double cB = (l1*l1 + b*b - l2*l2) / (2*l1*b);
+
+        double cA =
+            (l1*l1 + a*a - l2*l2) /
+            (2*l1*a);
+
+        double cB =
+            (l1*l1 + b*b - l2*l2) /
+            (2*l1*b);
+
+        if (
+            !std::isfinite(cA) ||
+            !std::isfinite(cB) ||
+            std::abs(cA) > 1.0 ||
+            std::abs(cB) > 1.0
+        )
+        {
+            Serial.println("Point unreachable");
+            return false;
+        }
 
         double alpha2 = std::acos(cA);
         double beta2  = std::acos(cB);
@@ -341,7 +350,7 @@ bool Kinematics::forwardKinematics(
 
     // Punkt końcowy K
     x = S_CD_x + h_v_x;
-    y = S_CD_y + h_v_y - 298.5; //srodek kartki
+    y = S_CD_y + h_v_y - 255; //srodek kartki
 
     return true;
 }

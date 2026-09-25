@@ -324,7 +324,7 @@ bool MotionManager::line(
 
     xSemaphoreGive(trajectoryMutex);
 
-    Serial.println("LINE READY");
+    // Serial.println("LINE READY");
 
     return true;
 }
@@ -402,42 +402,216 @@ bool MotionManager::calculateCurrentPosition(){
   
 }
 
-bool MotionManager::followTarget(){
-    double mass = 1;
-    double viscocity = 1;
-    double stiffness = 1;
+bool MotionManager::followTarget()
+{
+    if (
+        !liveTargetReceived ||
+        !liveTargetInside ||
+        millis() - liveTargetLastUpdate > 500
+    )
+    {
+        current_speed = 0.0;
+        line_vect_x = 0.0;
+        line_vect_y = 0.0;
 
-    double move_time = 0.1; 
+        return false;
+    }
 
-    double previous_distance = std::hypot(line_vect_x, line_vect_y);
+    double mass = 1.0;
+    double stiffness = 100.0;
+    double viscocity = 20.0;
+    double move_time = 0.01;
 
-    double speed_x = current_speed * line_vect_x / previous_distance;
-    double speed_y = current_speed * line_vect_y / previous_distance;
+    if (!calculateCurrentPosition())
+    {
+        return false;
+    }
 
-    double distance_x = liveTargetX - current_x;
-    double distance_y = liveTargetY - current_y;
+    constexpr double X_MAX = 138.5;
+    constexpr double Y_MAX = 95.0;
+    constexpr double MAX_SPEED = 300.0; // mm/s
+    constexpr double MAX_ACCELERATION = 800.0; // mm/s^2
 
-    int distance = std::hypot(distance_x, distance_y);
+    double target_x = constrain(
+        liveTargetX,
+        -X_MAX,
+        X_MAX
+    );
 
-    double acceleration_x = (- viscocity * speed_x - distance_x * stiffness) / mass;
-    double acceleration_y = (- viscocity * speed_y - distance_y * stiffness) / mass;
+    double target_y = constrain(
+        liveTargetY,
+        -Y_MAX,
+        Y_MAX
+    );
 
-    speed_x = speed_x + acceleration_x * move_time;
-    speed_y = speed_y + acceleration_y * move_time;
+    double previous_distance =
+        std::hypot(
+            line_vect_x,
+            line_vect_y
+        );
+
+    double speed_x = 0.0;
+    double speed_y = 0.0;
+
+    if (previous_distance > 0.000001)
+    {
+        speed_x =
+            current_speed
+            * line_vect_x
+            / previous_distance;
+
+        speed_y =
+            current_speed
+            * line_vect_y
+            / previous_distance;
+    }
+
+    double distance_x =
+        target_x - current_x;
+
+    double distance_y =
+        target_y - current_y;
+
+    double distance =
+        std::hypot(
+            distance_x,
+            distance_y
+        );
+
+    if (distance < 0.5)
+    {
+        current_speed = 0.0;
+        line_vect_x = 0.0;
+        line_vect_y = 0.0;
+
+        return false;
+    }
+
+    double acceleration_x =
+    (
+        -viscocity * speed_x
+        + stiffness * distance_x
+    )
+    / mass;
+
+    double acceleration_y =
+        (
+            -viscocity * speed_y
+            + stiffness * distance_y
+        )
+        / mass;
+
+
+// --------------------------------------------------
+// Limit przyspieszenia
+// --------------------------------------------------
+
     
-    current_speed = std::hypot(speed_x, speed_y);
+    double acceleration =
+        std::hypot(
+            acceleration_x,
+            acceleration_y
+        );
 
-    double new_distance = current_speed * move_time;
-    double new_distance_x = speed_x * move_time;
-    double new_distance_y = speed_y * move_time;
+    if (acceleration > MAX_ACCELERATION)
+    {
+        double scale =
+            MAX_ACCELERATION / acceleration;
 
-    line(current_x, 
-        current_y,
+        acceleration_x *= scale;
+        acceleration_y *= scale;
+    }
+
+
+    // --------------------------------------------------
+    // Aktualizacja prędkości
+    // --------------------------------------------------
+
+    speed_x +=
+        acceleration_x * move_time;
+
+    speed_y +=
+        acceleration_y * move_time;
+
+
+    // --------------------------------------------------
+    // Limit prędkości
+    // --------------------------------------------------
+
+    double speed =
+        std::hypot(
+            speed_x,
+            speed_y
+        );
+
+    if (speed > MAX_SPEED)
+    {
+        double scale =
+            MAX_SPEED / speed;
+
+        speed_x *= scale;
+        speed_y *= scale;
+    }
+
+    current_speed =
+        std::hypot(
+            speed_x,
+            speed_y
+        );
+
+    double new_distance_x =
+        speed_x * move_time;
+
+    double new_distance_y =
+        speed_y * move_time;
+
+    double next_x = constrain(
         current_x + new_distance_x,
+        -X_MAX,
+        X_MAX
+    );
+
+    double next_y = constrain(
         current_y + new_distance_y,
-        current_speed
+        -Y_MAX,
+        Y_MAX
+    );
+
+    static uint32_t lastDebug = 0;
+
+    new_distance_x =
+        next_x - current_x;
+
+    new_distance_y =
+        next_y - current_y;
+
+    if (
+        std::hypot(
+            new_distance_x,
+            new_distance_y
+        ) < 0.001
+    )
+    {
+        current_speed = 0.0;
+        line_vect_x = 0.0;
+        line_vect_y = 0.0;
+
+        return false;
+    }
+
+    line_vect_x = new_distance_x;
+    line_vect_y = new_distance_y;
+
+    return line(
+        current_x,
+        current_y,
+        next_x,
+        next_y,
+        current_speed,
+        0.0005
     );
 }
+
 
 
 

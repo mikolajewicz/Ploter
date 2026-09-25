@@ -14,11 +14,13 @@
 // Konfiguracja TMC2209
 // --------------------------------------------------
 
-constexpr double HOME_OFFSET_M1 = 99.0;
-constexpr double HOME_OFFSET_M2 = -53.0;
+
 
 constexpr double HOME_ANGLE_M1 = 141.866;
 constexpr double HOME_ANGLE_M2 = 180 - 141.866;
+
+constexpr double HOME_OFFSET_M1 = 99.0;
+constexpr double HOME_OFFSET_M2 = -101 + HOME_ANGLE_M2;
 
 constexpr double HOME_OFFSET_TIME = 2.0;
 constexpr double HOME_OFFSET_ACCEL_TIME = 0.5;
@@ -153,6 +155,8 @@ void updateHomeSequence(
 );
 
 int64_t angleToSteps(double angle);
+
+void testMotor1Direction();
 
 Kinematics Solver;
 
@@ -316,12 +320,29 @@ void loop()
     // Trajektorie
     motion_executor1.update();
     motion_executor2.update();
+
+    if (
+        homeState == 4 &&
+        !motion_executor1.isActive() &&
+        !motion_executor2.isActive()
+    )
+    {
+        if (motionManager.isTrajectoryReady())
+        {
+            motionManager.startPreparedMotion();
+        }
+        else
+        {
+            motionManager.followTarget();
+        }
+    }
 }
 
 void updateHomeSequence(
     bool homing1Finished,
     bool homing2Finished
 )
+
 {
     switch (homeState)
     {
@@ -436,7 +457,6 @@ void updateHomeSequence(
 
         case 4:
         {
-            // gotowe
             break;
         }
 
@@ -483,7 +503,47 @@ int64_t angleToSteps(double angle)
     );
 }
 
+void testMotor1Direction()
+{
+    Serial.println("=== M1 TEST ===");
 
+    motor1.enable();
+
+    Serial.print("Start stepCount: ");
+    Serial.println(motor1.getStepCount());
+
+    // DIR = false
+    motor1.setDirection(false);
+
+    Serial.println("M1 DIR=false - 200 steps");
+
+    for (int i = 0; i < 200; i++)
+    {
+        motor1.step();
+        delayMicroseconds(1000);
+    }
+
+    Serial.print("stepCount: ");
+    Serial.println(motor1.getStepCount());
+
+    delay(2000);
+
+    // DIR = true
+    motor1.setDirection(true);
+
+    Serial.println("M1 DIR=true - 200 steps");
+
+    for (int i = 0; i < 200; i++)
+    {
+        motor1.step();
+        delayMicroseconds(1000);
+    }
+
+    Serial.print("stepCount: ");
+    Serial.println(motor1.getStepCount());
+
+    Serial.println("=== END ===");
+}
 
 
 

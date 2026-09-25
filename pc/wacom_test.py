@@ -323,10 +323,17 @@ def send_tablet_position(
 
     inside = 1 if inside_page else 0
 
+    # współrzędne kartki:
+    # 0 ... 297  ->  -148.5 ... +148.5
+    # 0 ... 210  ->  -105.0 ... +105.0
+
+    plotter_x = x_mm - A4_WIDTH_MM / 2.0
+    plotter_y = y_mm - A4_HEIGHT_MM / 2.0
+
     message = (
         f"tablet "
-        f"{x_mm:.2f} "
-        f"{y_mm:.2f} "
+        f"{plotter_x:.2f} "
+        f"{plotter_y:.2f} "
         f"{pressure:.3f} "
         f"{inside}\n"
     )
@@ -335,7 +342,6 @@ def send_tablet_position(
         ser.write(
             message.encode("ascii")
         )
-
 
 # --------------------------------------------------
 # Obsługa tabletu
