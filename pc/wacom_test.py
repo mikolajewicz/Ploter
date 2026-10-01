@@ -1,3 +1,4 @@
+import os
 import pyglet
 from pyglet import shapes
 from pyglet.gl import glClearColor
@@ -6,13 +7,18 @@ import time
 import serial
 
 
+print("================================")
+print("WACOM TEST - SINGLE SERIAL READER")
+print("RUNNING:", os.path.abspath(__file__))
+print("================================")
+
+
 # --------------------------------------------------
 # Kartka A4
 # --------------------------------------------------
 
 A4_WIDTH_MM = 297.0
 A4_HEIGHT_MM = 210.0
-
 MARGIN_MM = 10.0
 
 WINDOW_WIDTH = 990
@@ -33,6 +39,15 @@ serial_lock = threading.Lock()
 
 SEND_INTERVAL = 0.01
 last_send_time = 0.0
+
+tip_position = None
+tip_position_lock = threading.Lock()
+
+rx_buffer = ""
+last_pos_debug_time = 0.0
+
+DEBUG_POS = True
+
 
 def plotter_to_screen(x_mm, y_mm):
     scale = min(
@@ -60,25 +75,18 @@ def plotter_to_screen(x_mm, y_mm):
 
     return screen_x, screen_y
 
+
 def send_command(command):
     message = command.strip() + "\n"
 
-    with serial_lock:
-        ser.write(message.encode("ascii"))
+    try:
+        with serial_lock:
+            ser.write(message.encode("ascii"))
 
-    print("CMD:", command)
+        print("CMD:", command)
 
-
-def read_esp(dt):
-    while ser.in_waiting > 0:
-
-        line = ser.readline().decode(
-            "utf-8",
-            errors="ignore"
-        ).strip()
-
-        # if line:
-            # print("ESP:", line)
+    except (serial.SerialException, OSError) as e:
+        print("Serial TX error:", e)
 
 
 def console_input():
@@ -103,12 +111,6 @@ def console_input():
             print("Terminal error:", e)
 
 
-threading.Thread(
-    target=console_input,
-    daemon=True
-).start()
-
-
 # --------------------------------------------------
 # Okno
 # --------------------------------------------------
@@ -122,8 +124,9 @@ window = pyglet.window.Window(
 
 glClearColor(1.0, 1.0, 1.0, 1.0)
 
+
 # --------------------------------------------------
-# Tablet - OPCJONALNY
+# Tablet
 # --------------------------------------------------
 
 tablets = pyglet.input.get_tablets()
@@ -132,6 +135,7 @@ tablet = None
 canvas = None
 tablet_available = False
 
+print("TABLETS FOUND:", len(tablets))
 
 if tablets:
     tablet = tablets[0]
@@ -140,13 +144,12 @@ if tablets:
     print(tablet)
 
     canvas = tablet.open(window)
-
     tablet_available = True
-
 else:
     print()
-    print("Nie znaleziono tabletu.")
-    print("Terminal nadal działa.")
+    print("!!! NIE ZNALEZIONO TABLETU !!!")
+    print("Podążanie za rysikiem nie będzie działało.")
+    print("Terminal i odbiór POS nadal działają.")
     print()
 
 
@@ -169,7 +172,7 @@ PRESSURE_THRESHOLD = 0.01
 
 
 # --------------------------------------------------
-# Przeliczenie marginesu mm -> piksele
+# Margines
 # --------------------------------------------------
 
 margin_x_px = (
@@ -182,54 +185,32 @@ margin_y_px = (
     * WINDOW_HEIGHT
 )
 
-
-# --------------------------------------------------
-# Ramka marginesu
-# --------------------------------------------------
-
 left = margin_x_px
 right = WINDOW_WIDTH - margin_x_px
-
 bottom = margin_y_px
 top = WINDOW_HEIGHT - margin_y_px
 
-
 margin_lines = [
     shapes.Line(
-        left,
-        bottom,
-        right,
-        bottom,
+        left, bottom, right, bottom,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
     ),
-
     shapes.Line(
-        right,
-        bottom,
-        right,
-        top,
+        right, bottom, right, top,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
     ),
-
     shapes.Line(
-        right,
-        top,
-        left,
-        top,
+        right, top, left, top,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
     ),
-
     shapes.Line(
-        left,
-        top,
-        left,
-        bottom,
+        left, top, left, bottom,
         thickness=1,
         color=(150, 150, 150),
         batch=ui_batch
@@ -251,12 +232,18 @@ else:
         "Tablet: BRAK | terminal aktywny"
     )
 
-
 position_label = pyglet.text.Label(
     initial_text,
     x=45,
     y=15,
     color=(0, 0, 0, 255)
+)
+
+pos_label = pyglet.text.Label(
+    "POS: brak",
+    x=45,
+    y=35,
+    color=(0, 120, 0, 255)
 )
 
 
@@ -266,10 +253,8 @@ position_label = pyglet.text.Label(
 
 BUTTON_X = 10
 BUTTON_Y = WINDOW_HEIGHT - 30
-
 BUTTON_WIDTH = 100
 BUTTON_HEIGHT = 25
-
 
 clear_button = shapes.Rectangle(
     BUTTON_X,
@@ -279,7 +264,6 @@ clear_button = shapes.Rectangle(
     color=(220, 220, 220),
     batch=ui_batch
 )
-
 
 clear_label = pyglet.text.Label(
     "WYCZYŚĆ",
@@ -296,6 +280,7 @@ tip_marker = shapes.Circle(
     radius=7,
     color=(0, 200, 0)
 )
+
 
 # --------------------------------------------------
 # Czyszczenie
@@ -315,13 +300,8 @@ def clear_drawing():
     print("Wyczyszczono kartkę")
 
 
-# --------------------------------------------------
-# Kliknięcie
-# --------------------------------------------------
-
 @window.event
 def on_mouse_press(x, y, button, modifiers):
-
     inside_button = (
         BUTTON_X <= x <= BUTTON_X + BUTTON_WIDTH
         and
@@ -353,10 +333,6 @@ def send_tablet_position(
 
     inside = 1 if inside_page else 0
 
-    # współrzędne kartki:
-    # 0 ... 297  ->  -148.5 ... +148.5
-    # 0 ... 210  ->  -105.0 ... +105.0
-
     plotter_x = x_mm - A4_WIDTH_MM / 2.0
     plotter_y = y_mm - A4_HEIGHT_MM / 2.0
 
@@ -368,10 +344,13 @@ def send_tablet_position(
         f"{inside}\n"
     )
 
-    with serial_lock:
-        ser.write(
-            message.encode("ascii")
-        )
+    try:
+        with serial_lock:
+            ser.write(message.encode("ascii"))
+
+    except (serial.SerialException, OSError) as e:
+        print("Serial TX error:", e)
+
 
 # --------------------------------------------------
 # Obsługa tabletu
@@ -386,14 +365,11 @@ if canvas is not None:
 
     @canvas.event
     def on_leave(cursor):
-        global last_x
-        global last_y
+        global last_x, last_y
 
         last_x = None
         last_y = None
 
-        # Powiedz ESP32, że pióro
-        # nie jest aktywne.
         send_tablet_position(
             last_x_mm,
             last_y_mm,
@@ -412,15 +388,8 @@ if canvas is not None:
         pressure,
         *args
     ):
-        global last_x
-        global last_y
-
-        global last_x_mm
-        global last_y_mm
-
-        # ------------------------------------------
-        # piksele -> mm
-        # ------------------------------------------
+        global last_x, last_y
+        global last_x_mm, last_y_mm
 
         x_mm = (
             x /
@@ -437,25 +406,15 @@ if canvas is not None:
         last_x_mm = x_mm
         last_y_mm = y_mm
 
-        # ------------------------------------------
-        # Obszar roboczy
-        # ------------------------------------------
-
         inside_page = (
             MARGIN_MM
             <= x_mm
             <= A4_WIDTH_MM - MARGIN_MM
-
             and
-
             MARGIN_MM
             <= y_mm
             <= A4_HEIGHT_MM - MARGIN_MM
         )
-
-        # ------------------------------------------
-        # ESP32
-        # ------------------------------------------
 
         send_tablet_position(
             x_mm,
@@ -464,14 +423,7 @@ if canvas is not None:
             inside_page
         )
 
-        # ------------------------------------------
-        # Tekst
-        # ------------------------------------------
-
-        if inside_page:
-            status = "OK"
-        else:
-            status = "POZA OBSZAREM"
+        status = "OK" if inside_page else "POZA OBSZAREM"
 
         position_label.text = (
             f"X={x_mm:6.1f} mm   "
@@ -480,20 +432,14 @@ if canvas is not None:
             f"{status}"
         )
 
-        # ------------------------------------------
-        # Rysowanie
-        # ------------------------------------------
-
         if (
             pressure > PRESSURE_THRESHOLD
             and inside_page
         ):
-
             if (
                 last_x is not None
                 and last_y is not None
             ):
-
                 line = shapes.Line(
                     last_x,
                     last_y,
@@ -510,40 +456,96 @@ if canvas is not None:
             last_y = y
 
         else:
-
             last_x = None
             last_y = None
 
 
-tip_position = None
-tip_position_lock = threading.Lock()
+# --------------------------------------------------
+# Jedyny odbiornik ESP32
+# --------------------------------------------------
 
-
-def serial_receive_loop():
+def handle_esp_line(line):
     global tip_position
+    global last_pos_debug_time
 
-    while True:
+    if not line:
+        return
+
+    parts = line.split()
+
+    if len(parts) == 3 and parts[0] == "POS":
         try:
-            line = ser.readline().decode(
-                "ascii",
-                errors="ignore"
-            ).strip()
+            x = float(parts[1])
+            y = float(parts[2])
 
-            if not line:
-                continue
+        except ValueError:
+            print("BAD POS:", repr(line))
+            return
 
-            parts = line.split()
+        # Filtr tylko diagnostyczny:
+        # odrzucamy NaN / inf / absurdalne wartości.
+        if not (-10000.0 < x < 10000.0):
+            print("BAD POS X:", repr(line))
+            return
 
-            if len(parts) == 3 and parts[0] == "POS":
-                x = float(parts[1])
-                y = float(parts[2])
+        if not (-10000.0 < y < 10000.0):
+            print("BAD POS Y:", repr(line))
+            return
 
-                with tip_position_lock:
-                    tip_position = (x, y)
+        with tip_position_lock:
+            tip_position = (x, y)
 
-        except Exception as e:
-            print("Serial RX error:", e)
-            time.sleep(0.05)
+        pos_label.text = (
+            f"POS: X={x:8.3f}  Y={y:8.3f}"
+        )
+
+        now = time.monotonic()
+
+        if (
+            DEBUG_POS
+            and now - last_pos_debug_time >= 0.5
+        ):
+            last_pos_debug_time = now
+            # print(
+            #     f"POS OK: "
+            #     f"{x:9.3f} "
+            #     f"{y:9.3f}"
+            # )
+
+        return
+
+    print("ESP:", line)
+
+
+def read_esp(dt):
+    global rx_buffer
+
+    try:
+        waiting = ser.in_waiting
+
+        if waiting <= 0:
+            return
+
+        data = ser.read(waiting).decode(
+            "ascii",
+            errors="ignore"
+        )
+
+        rx_buffer += data
+
+        while "\n" in rx_buffer:
+            line, rx_buffer = rx_buffer.split(
+                "\n",
+                1
+            )
+
+            handle_esp_line(
+                line.strip()
+            )
+
+    except (serial.SerialException, OSError) as e:
+        print("Serial RX error:", e)
+
 
 # --------------------------------------------------
 # Rysowanie okna
@@ -551,13 +553,13 @@ def serial_receive_loop():
 
 @window.event
 def on_draw():
-
     window.clear()
 
     drawing_batch.draw()
     ui_batch.draw()
 
     position_label.draw()
+    pos_label.draw()
     clear_label.draw()
 
     with tip_position_lock:
@@ -576,22 +578,34 @@ def on_draw():
 
         tip_marker.draw()
 
+
 # --------------------------------------------------
-# ESP32 RX
+# Zamknięcie
 # --------------------------------------------------
+
+@window.event
+def on_close():
+    try:
+        if ser.is_open:
+            ser.close()
+    except Exception:
+        pass
+
+    pyglet.app.exit()
+
+
+# --------------------------------------------------
+# Start
+# --------------------------------------------------
+
+threading.Thread(
+    target=console_input,
+    daemon=True
+).start()
 
 pyglet.clock.schedule_interval(
     read_esp,
     0.01
 )
-
-threading.Thread(
-    target=serial_receive_loop,
-    daemon=True
-).start()
-
-# --------------------------------------------------
-# Start
-# --------------------------------------------------
 
 pyglet.app.run()

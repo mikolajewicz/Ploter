@@ -369,20 +369,21 @@ void MotionManager::setLiveTarget(
     bool inside
 )
 {
-    liveTargetX = x;
-    liveTargetY = y;
-
-    livePressure = pressure;
-    liveTargetInside = inside;
-
-    liveTargetReceived = true;
     liveTargetLastUpdate = millis();
+    liveTargetInside = inside;
 
     if (!inside)
     {
         pen.up();
         return;
     }
+
+    // Zapamiętujemy tylko ostatni POPRAWNY punkt.
+    liveTargetX = x;
+    liveTargetY = y;
+
+    livePressure = pressure;
+    liveTargetReceived = true;
 
     pen.setPressure(pressure);
 }
@@ -406,7 +407,6 @@ bool MotionManager::followTarget()
 {
     if (
         !liveTargetReceived ||
-        !liveTargetInside ||
         millis() - liveTargetLastUpdate > 500
     )
     {

@@ -301,56 +301,96 @@ bool Kinematics::forwardKinematics(
     constexpr double l2 = 260.0;
     constexpr double d  = 150.0;
 
-    // stopnie -> radiany
-    double q1 = m1_angle * M_PI / 180.0;
-    double q2 = m2_angle * M_PI / 180.0;
+    // ----------------------------------------------
+    // WAŻNE:
+    //
+    // stepCount silnika 1 ma układ odniesienia
+    // przesunięty o -180 stopni względem kąta
+    // używanego przez kinematykę.
+    // ----------------------------------------------
 
-    // Punkt D
-    double rD_x = l1 * std::cos(q1) - d / 2.0;
-    double rD_y = l1 * std::sin(q1);
+    double q1 =
+        (m1_angle + 180.0)
+        * M_PI / 180.0;
 
-    // Punkt C
-    double rC_x = l1 * std::cos(q2) + d / 2.0;
-    double rC_y = l1 * std::sin(q2);
+    double q2 =
+        m2_angle
+        * M_PI / 180.0;
+
+    // Punkt D - lewe ramię
+    double rD_x =
+        l1 * std::cos(q1)
+        - d / 2.0;
+
+    double rD_y =
+        l1 * std::sin(q1);
+
+    // Punkt C - prawe ramię
+    double rC_x =
+        l1 * std::cos(q2)
+        + d / 2.0;
+
+    double rC_y =
+        l1 * std::sin(q2);
 
     // Środek odcinka CD
-    double S_CD_x = (rD_x + rC_x) / 2.0;
-    double S_CD_y = (rD_y + rC_y) / 2.0;
+    double S_CD_x =
+        (rD_x + rC_x) / 2.0;
+
+    double S_CD_y =
+        (rD_y + rC_y) / 2.0;
 
     // Wektor D -> C
-    double CD_x = rC_x - rD_x;
-    double CD_y = rC_y - rD_y;
+    double CD_x =
+        rC_x - rD_x;
 
-    // Długość CD
-    double CD = std::sqrt(
-        CD_x * CD_x +
-        CD_y * CD_y
-    );
+    double CD_y =
+        rC_y - rD_y;
 
-    // Sprawdzenie, czy drugi człon może połączyć C i D
+    double CD =
+        std::hypot(
+            CD_x,
+            CD_y
+        );
+
     double hSquared =
-        l2 * l2 -
-        (CD / 2.0) * (CD / 2.0);
+        l2 * l2
+        - (CD / 2.0)
+        * (CD / 2.0);
 
     if (hSquared < 0.0)
     {
         return false;
     }
 
-    double alpha = std::atan2(
-        CD_y,
-        CD_x
-    );
+    double alpha =
+        std::atan2(
+            CD_y,
+            CD_x
+        );
 
-    double h = std::sqrt(hSquared);
+    double h =
+        std::sqrt(hSquared);
 
-    // Wektor prostopadły
-    double h_v_x = -h * std::sin(alpha);
-    double h_v_y =  h * std::cos(alpha);
+    double h_v_x =
+        -h * std::sin(alpha);
 
-    // Punkt końcowy K
-    x = S_CD_x + h_v_x;
-    y = S_CD_y + h_v_y - 255; //srodek kartki
+    double h_v_y =
+         h * std::cos(alpha);
+
+    x =
+        S_CD_x
+        + h_v_x;
+
+    // Ten sam offset co w inverse kinematics:
+    //
+    // ky = y + 150 + 210/2
+    //    = y + 255
+    //
+    y =
+        S_CD_y
+        + h_v_y
+        - 255.0;
 
     return true;
 }
