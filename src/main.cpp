@@ -16,11 +16,11 @@
 
 
 
-constexpr double HOME_ANGLE_M1 = 141.866;
-constexpr double HOME_ANGLE_M2 = 180 - 141.866;
+constexpr double HOME_ANGLE_M1 = 141.866 - 180.0;
+constexpr double HOME_ANGLE_M2 = 180.0 - 141.866;
 
-constexpr double HOME_OFFSET_M1 = 99.0;
-constexpr double HOME_OFFSET_M2 = -101 + HOME_ANGLE_M2;
+constexpr double HOME_OFFSET_M1 = 101.0 + HOME_ANGLE_M1;
+constexpr double HOME_OFFSET_M2 = -101.0 + HOME_ANGLE_M2;
 
 constexpr double HOME_OFFSET_TIME = 2.0;
 constexpr double HOME_OFFSET_ACCEL_TIME = 0.5;
@@ -72,7 +72,7 @@ constexpr int DIAG1_PIN = 34;
 constexpr int DIAG2_PIN = 35;
 
 // Początkowe ustawienia
-constexpr uint16_t INITIAL_RMS_CURRENT = 600;
+constexpr uint16_t INITIAL_RMS_CURRENT = 800;
 constexpr uint16_t INITIAL_MICROSTEPS = 16;
 constexpr uint32_t INITIAL_SPEED = 0;
 
@@ -336,6 +336,26 @@ void loop()
             motionManager.followTarget();
         }
     }
+
+
+    static uint32_t lastPositionSend = 0;
+
+    if (
+        homeState == 4 &&
+        millis() - lastPositionSend >= 20
+    )
+    {
+        lastPositionSend = millis();
+
+        if (motionManager.calculateCurrentPosition())
+        {
+            Serial.printf(
+                "POS %.3f %.3f\n",
+                motionManager.getCurrentX(),
+                motionManager.getCurrentY()
+            );
+        }
+    }
 }
 
 void updateHomeSequence(
@@ -448,6 +468,9 @@ void updateHomeSequence(
                 motor2.setStepCount(
                     angleToSteps(HOME_ANGLE_M2)
                 );
+
+                tmc1.rms_current(INITIAL_RMS_CURRENT);
+                tmc1.rms_current(INITIAL_RMS_CURRENT);
             }
 
             

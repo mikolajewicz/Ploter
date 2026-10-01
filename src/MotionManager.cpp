@@ -418,8 +418,8 @@ bool MotionManager::followTarget()
     }
 
     double mass = 1.0;
-    double stiffness = 100.0;
-    double viscocity = 20.0;
+    double stiffness = 500.0;
+    double viscocity = 3 * std::sqrt(mass * stiffness);
     double move_time = 0.01;
 
     if (!calculateCurrentPosition())
@@ -429,8 +429,8 @@ bool MotionManager::followTarget()
 
     constexpr double X_MAX = 138.5;
     constexpr double Y_MAX = 95.0;
-    constexpr double MAX_SPEED = 300.0; // mm/s
-    constexpr double MAX_ACCELERATION = 800.0; // mm/s^2
+    constexpr double MAX_SPEED = 500.0; // mm/s
+    constexpr double MAX_ACCELERATION = 2000.0; // mm/s^2
 
     double target_x = constrain(
         liveTargetX,
@@ -478,7 +478,7 @@ bool MotionManager::followTarget()
             distance_y
         );
 
-    if (distance < 0.5)
+    if (distance < 0.0)
     {
         current_speed = 0.0;
         line_vect_x = 0.0;

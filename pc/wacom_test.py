@@ -34,6 +34,31 @@ serial_lock = threading.Lock()
 SEND_INTERVAL = 0.01
 last_send_time = 0.0
 
+def plotter_to_screen(x_mm, y_mm):
+    scale = min(
+        WINDOW_WIDTH / A4_WIDTH_MM,
+        WINDOW_HEIGHT / A4_HEIGHT_MM
+    )
+
+    page_width = A4_WIDTH_MM * scale
+    page_height = A4_HEIGHT_MM * scale
+
+    page_x = (WINDOW_WIDTH - page_width) / 2
+    page_y = (WINDOW_HEIGHT - page_height) / 2
+
+    screen_x = (
+        page_x
+        + page_width / 2
+        + x_mm * scale
+    )
+
+    screen_y = (
+        page_y
+        + page_height / 2
+        + y_mm * scale
+    )
+
+    return screen_x, screen_y
 
 def send_command(command):
     message = command.strip() + "\n"
@@ -52,8 +77,8 @@ def read_esp(dt):
             errors="ignore"
         ).strip()
 
-        if line:
-            print("ESP:", line)
+        # if line:
+            # print("ESP:", line)
 
 
 def console_input():
@@ -96,7 +121,6 @@ window = pyglet.window.Window(
 )
 
 glClearColor(1.0, 1.0, 1.0, 1.0)
-
 
 # --------------------------------------------------
 # Tablet - OPCJONALNY
@@ -266,6 +290,12 @@ clear_label = pyglet.text.Label(
     color=(0, 0, 0, 255)
 )
 
+tip_marker = shapes.Circle(
+    0,
+    0,
+    radius=7,
+    color=(0, 200, 0)
+)
 
 # --------------------------------------------------
 # Czyszczenie
@@ -485,6 +515,36 @@ if canvas is not None:
             last_y = None
 
 
+tip_position = None
+tip_position_lock = threading.Lock()
+
+
+def serial_receive_loop():
+    global tip_position
+
+    while True:
+        try:
+            line = ser.readline().decode(
+                "ascii",
+                errors="ignore"
+            ).strip()
+
+            if not line:
+                continue
+
+            parts = line.split()
+
+            if len(parts) == 3 and parts[0] == "POS":
+                x = float(parts[1])
+                y = float(parts[2])
+
+                with tip_position_lock:
+                    tip_position = (x, y)
+
+        except Exception as e:
+            print("Serial RX error:", e)
+            time.sleep(0.05)
+
 # --------------------------------------------------
 # Rysowanie okna
 # --------------------------------------------------
@@ -500,6 +560,21 @@ def on_draw():
     position_label.draw()
     clear_label.draw()
 
+    with tip_position_lock:
+        position = tip_position
+
+    if position is not None:
+        x_mm, y_mm = position
+
+        screen_x, screen_y = plotter_to_screen(
+            x_mm,
+            y_mm
+        )
+
+        tip_marker.x = screen_x
+        tip_marker.y = screen_y
+
+        tip_marker.draw()
 
 # --------------------------------------------------
 # ESP32 RX
@@ -510,6 +585,10 @@ pyglet.clock.schedule_interval(
     0.01
 )
 
+threading.Thread(
+    target=serial_receive_loop,
+    daemon=True
+).start()
 
 # --------------------------------------------------
 # Start
