@@ -72,7 +72,7 @@ constexpr int DIAG1_PIN = 34;
 constexpr int DIAG2_PIN = 35;
 
 // Początkowe ustawienia
-constexpr uint16_t INITIAL_RMS_CURRENT = 800;
+constexpr uint16_t INITIAL_RMS_CURRENT = 900;
 constexpr uint16_t INITIAL_MICROSTEPS = 16;
 constexpr uint32_t INITIAL_SPEED = 0;
 

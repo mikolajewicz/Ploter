@@ -21,8 +21,8 @@ A4_WIDTH_MM = 297.0
 A4_HEIGHT_MM = 210.0
 MARGIN_MM = 10.0
 
-WINDOW_WIDTH = 990
-WINDOW_HEIGHT = 700
+WINDOW_WIDTH = 1485 #990
+WINDOW_HEIGHT = 1000 #700
 
 
 # --------------------------------------------------
