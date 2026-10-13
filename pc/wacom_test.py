@@ -5,6 +5,7 @@ from pyglet.gl import glClearColor
 import threading
 import time
 import serial
+from pyglet.window import mouse
 
 
 print("================================")
@@ -129,29 +130,44 @@ glClearColor(1.0, 1.0, 1.0, 1.0)
 # Tablet
 # --------------------------------------------------
 
-tablets = pyglet.input.get_tablets()
-
 tablet = None
-canvas = None
+tablet_canvas = None
 tablet_available = False
 
-print("TABLETS FOUND:", len(tablets))
 
-if tablets:
-    tablet = tablets[0]
+def connect_tablet():
+    global tablet, tablet_canvas, tablet_available
 
-    print("Znaleziono tablet:")
-    print(tablet)
+    if tablet_canvas is not None:
+        return True
 
-    canvas = tablet.open(window)
-    tablet_available = True
-else:
-    print()
-    print("!!! NIE ZNALEZIONO TABLETU !!!")
-    print("Podążanie za rysikiem nie będzie działało.")
-    print("Terminal i odbiór POS nadal działają.")
-    print()
+    try:
+        tablets = pyglet.input.get_tablets()
 
+        if not tablets:
+            print("Nie znaleziono tabletu")
+            position_label.text = "Tablet: BRAK"
+            return False
+
+        tablet = tablets[0]
+        tablet_canvas = tablet.open(window)
+
+        setup_tablet_handlers(tablet_canvas)
+
+        tablet_available = True
+        position_label.text = "Tablet: OK"
+
+        print("Tablet podłączony:", tablet)
+        return True
+
+    except Exception as e:
+        print("Tablet error:", e)
+
+        tablet = None
+        tablet_canvas = None
+        tablet_available = False
+
+        return False
 
 # --------------------------------------------------
 # Rysowanie
@@ -222,15 +238,7 @@ margin_lines = [
 # Tekst
 # --------------------------------------------------
 
-if tablet_available:
-    initial_text = (
-        "Tablet: OK | "
-        "X=0.0 mm Y=0.0 mm P=0.000"
-    )
-else:
-    initial_text = (
-        "Tablet: BRAK | terminal aktywny"
-    )
+initial_text = "Tablet: niepodłączony | kliknij obszar rysowania"
 
 position_label = pyglet.text.Label(
     initial_text,
@@ -283,6 +291,32 @@ tip_marker = shapes.Circle(
 
 
 # --------------------------------------------------
+# Przycisk HOME
+# --------------------------------------------------
+
+
+HOME_BUTTON_WIDTH = 100
+HOME_BUTTON_HEIGHT = 25
+HOME_BUTTON_MARGIN = 10
+
+home_button = shapes.Rectangle(
+    WINDOW_WIDTH - HOME_BUTTON_WIDTH - HOME_BUTTON_MARGIN,
+    WINDOW_HEIGHT - HOME_BUTTON_HEIGHT - HOME_BUTTON_MARGIN,
+    HOME_BUTTON_WIDTH,
+    HOME_BUTTON_HEIGHT,
+    color=(70, 70, 70)
+)
+
+home_label = pyglet.text.Label(
+    "HOME",
+    x=home_button.x + home_button.width / 2,
+    y=home_button.y + home_button.height / 2,
+    anchor_x="center",
+    anchor_y="center",
+    font_size=12
+)
+
+# --------------------------------------------------
 # Czyszczenie
 # --------------------------------------------------
 
@@ -300,16 +334,34 @@ def clear_drawing():
     print("Wyczyszczono kartkę")
 
 
+
 @window.event
 def on_mouse_press(x, y, button, modifiers):
-    inside_button = (
-        BUTTON_X <= x <= BUTTON_X + BUTTON_WIDTH
-        and
-        BUTTON_Y <= y <= BUTTON_Y + BUTTON_HEIGHT
+
+    if button != mouse.LEFT:
+        return
+
+    # HOME
+    if is_inside_rectangle(x, y, home_button):
+        print("HOME")
+        send_command("home")
+        
+        return
+
+    # WYCZYŚĆ
+    if is_inside_rectangle(x, y, clear_button):
+        clear_drawing()
+        return
+
+    # Obszar rysowania (z marginesem)
+    inside_drawing_area = (
+        left <= x <= right
+        and bottom <= y <= top
     )
 
-    if inside_button:
-        clear_drawing()
+    if inside_drawing_area:
+        connect_tablet()
+        return
 
 
 # --------------------------------------------------
@@ -356,12 +408,11 @@ def send_tablet_position(
 # Obsługa tabletu
 # --------------------------------------------------
 
-if canvas is not None:
+def setup_tablet_handlers(canvas):
 
     @canvas.event
     def on_enter(cursor):
         print("Piórko wykryte")
-
 
     @canvas.event
     def on_leave(cursor):
@@ -551,6 +602,12 @@ def read_esp(dt):
 # Rysowanie okna
 # --------------------------------------------------
 
+def is_inside_rectangle(x, y, rect):
+    return (
+        rect.x <= x <= rect.x + rect.width
+        and rect.y <= y <= rect.y + rect.height
+    )
+
 @window.event
 def on_draw():
     window.clear()
@@ -577,6 +634,9 @@ def on_draw():
         tip_marker.y = screen_y
 
         tip_marker.draw()
+    
+    home_button.draw()
+    home_label.draw()    
 
 
 # --------------------------------------------------

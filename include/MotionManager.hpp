@@ -162,5 +162,7 @@ public:
     double getCurrentY(){ return current_y; }
 
     bool followTarget();
+
+    void clearLiveTarget();
 };
 

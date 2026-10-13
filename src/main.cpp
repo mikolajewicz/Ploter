@@ -170,6 +170,21 @@ PenController pen(
     90      // dół
 );
 
+bool requestHomeSequence()
+{
+    // Bazowanie jest już w toku
+    if (homeState >= 1 && homeState <= 3) {
+        return false;
+    }
+
+    // Podnieś pióro przed bazowaniem
+    pen.up();
+
+    startHomeSequence();
+
+    return true;
+}
+
 MotionManager motionManager(
     motor1,
     tmc1,
@@ -202,6 +217,11 @@ SerialCommandHandler serialCommandHandler(
 
     motionManager
 );
+
+bool isHomeSequenceActive()
+{
+    return homeState >= 1 && homeState <= 3;
+}
 
 // --------------------------------------------------
 // setup
@@ -470,7 +490,7 @@ void updateHomeSequence(
                 );
 
                 tmc1.rms_current(INITIAL_RMS_CURRENT);
-                tmc1.rms_current(INITIAL_RMS_CURRENT);
+                tmc2.rms_current(INITIAL_RMS_CURRENT);
             }
 
             
@@ -498,6 +518,8 @@ void updateHomeSequence(
 
 void startHomeSequence()
 {
+    motionManager.clearLiveTarget();
+
     motor1Homed = false;
     motor2Homed = false;
 

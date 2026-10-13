@@ -612,7 +612,17 @@ bool MotionManager::followTarget()
     );
 }
 
+void MotionManager::clearLiveTarget()
+{
+    liveTargetReceived = false;
+    liveTargetInside = false;
 
+    current_speed = 0.0;
+    line_vect_x = 0.0;
+    line_vect_y = 0.0;
+
+    pen.up();
+}
 
 
 

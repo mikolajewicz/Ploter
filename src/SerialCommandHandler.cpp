@@ -8,6 +8,9 @@
 #include "Kinematics.hpp"
 #include "MotionManager.hpp"
 
+extern bool requestHomeSequence();
+extern bool isHomeSequenceActive();
+
 SerialCommandHandler::SerialCommandHandler(
     MotorDriver& motor1,
     TMC2209Stepper& tmc1,
@@ -42,6 +45,7 @@ void SerialCommandHandler::printHelp()
     Serial.println("GLOBAL:");
     Serial.println("  help");
     Serial.println("  stop");
+    Serial.println("  home");
 
     Serial.println();
     Serial.println("MOTOR:");
@@ -253,32 +257,69 @@ void SerialCommandHandler::handleSerialCommand(
         return;
     }
 
-    // --------------------------------------------
-    // TABLET
-    // --------------------------------------------
-
-    if (group == "tablet")
+    
+    if (group == "home")
     {
-        // Przekazujemy cala linie, bo parser
-        // oczekuje:
-        // tablet x y pressure inside
+        if (rest.length() != 0)
+        {
+            Serial.println("Usage: home");
+            return;
+        }
 
-        handleTabletCommand(line);
+        if (requestHomeSequence())
+        {
+            Serial.println("HOME ACCEPTED");
+        }
+        else
+        {
+            Serial.println("ERR HOME BUSY");
+        }
 
         return;
     }
 
+
+    // --------------------------------------------
+    // TABLET
+    // --------------------------------------------
+
+
+    if (group == "tablet")
+    {
+        if (isHomeSequenceActive())
+            {
+                return;
+            }
+
+            handleTabletCommand(line);
+            return;
+    }   
     // --------------------------------------------
     //  MOTION
     // --------------------------------------------
 
 
-    if (group == "motion")
+   if (group == "motion")
     {
+        if (isHomeSequenceActive())
+        {
+            Serial.println("ERR HOME ACTIVE");
+            return;
+        }
+
         handleMotionCommand(rest);
         return;
     }
 
+
+    if (
+        (group == "m1" || group == "m2") &&
+        isHomeSequenceActive()
+    )
+    {
+        Serial.println("ERR HOME ACTIVE");
+        return;
+    }
 
     // --------------------------------------------
     // MOTOR 1
@@ -1178,6 +1219,11 @@ void SerialCommandHandler::handleMotionCommand(
 
 void SerialCommandHandler::updatePendingMotion()
 {
+    if (isHomeSequenceActive())
+    {
+        return;
+    }
+
     if (!motionCommandPending_)
     {
         return;
