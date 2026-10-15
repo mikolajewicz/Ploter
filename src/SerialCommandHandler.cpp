@@ -10,6 +10,7 @@
 
 extern bool requestHomeSequence();
 extern bool isHomeSequenceActive();
+extern void sendResponse(const char* message);
 
 SerialCommandHandler::SerialCommandHandler(
     MotorDriver& motor1,
@@ -252,7 +253,7 @@ void SerialCommandHandler::handleSerialCommand(
     {
         stopAll();
 
-        Serial.println("ALL STOPPED");
+        sendResponse("ALL STOPPED");
 
         return;
     }
@@ -268,11 +269,11 @@ void SerialCommandHandler::handleSerialCommand(
 
         if (requestHomeSequence())
         {
-            Serial.println("HOME ACCEPTED");
+            sendResponse("HOME ACCEPTED");
         }
         else
         {
-            Serial.println("ERR HOME BUSY");
+            sendResponse("ERR HOME BUSY");
         }
 
         return;

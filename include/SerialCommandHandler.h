@@ -73,6 +73,11 @@ public:
         MotionManager& motionManager
     );
 
+    void processCommand(const String& line)
+    {
+        handleSerialCommand(line);
+    }
+
     void readSerialCommands();
 
     void printHelp();

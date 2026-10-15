@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Prywatne dane Wi-Fi
+include/secrets.h
+ota.ini

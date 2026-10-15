@@ -1,5 +1,7 @@
 #include "MotionManager.hpp"
 
+extern bool isHomeSequenceActive();
+
 MotionManager::MotionManager(
     MotorDriver& motor1,
     TMC2209Stepper& tmc1,
@@ -369,6 +371,13 @@ void MotionManager::setLiveTarget(
     bool inside
 )
 {
+
+    if (isHomeSequenceActive())
+    {
+        clearLiveTarget();
+        return;
+    }
+
     liveTargetLastUpdate = millis();
     liveTargetInside = inside;
 

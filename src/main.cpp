@@ -9,6 +9,96 @@
 #include "Kinematics.hpp"
 #include "MotionManager.hpp"
 #include "PenController.hpp"
+#include <WiFi.h>
+#include "secrets.h"
+#include <ArduinoOTA.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
+// --------------------------------------------------
+// Konfiguracja WIFI
+// --------------------------------------------------
+
+void setupWiFi()
+{
+    WiFi.mode(WIFI_STA);
+
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    Serial.print("Connecting to WiFi");
+
+    unsigned long start = millis();
+
+    while (
+        WiFi.status() != WL_CONNECTED &&
+        millis() - start < 10000
+    )
+    {
+        delay(100);
+        Serial.print(".");
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        Serial.println();
+        Serial.print("ESP IP: ");
+        Serial.println(WiFi.localIP());
+
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            ArduinoOTA.setHostname("ploter-esp32");
+            ArduinoOTA.setPassword(OTA_PASSWORD);
+
+            ArduinoOTA.onStart([]() {
+                // Nie rozpoczynaj aktualizacji podczas ruchu.
+                // Docelowo tutaj wyłączamy sterowanie silnikami
+                // i anulujemy wszystkie ruchy.
+                Serial.println("OTA START");
+            });
+
+            ArduinoOTA.begin();
+
+            Serial.println("OTA READY");
+            Serial.println(WiFi.localIP());
+        }
+    }
+    else
+    {
+        Serial.println("WiFi connection failed");
+    }
+
+}
+
+void maintainWiFi()
+{
+    static uint32_t lastReconnectAttempt = 0;
+
+    if (WiFi.status() == WL_CONNECTED)
+        return;
+
+    if (millis() - lastReconnectAttempt < 5000)
+        return;
+
+    lastReconnectAttempt = millis();
+
+    Serial.println("WiFi reconnecting...");
+    WiFi.reconnect();
+}
+
+void otaTask(void* parameter)
+{
+    while (true)
+    {
+        maintainWiFi();
+
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            ArduinoOTA.handle();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
 
 // --------------------------------------------------
 // Konfiguracja TMC2209
@@ -223,11 +313,337 @@ bool isHomeSequenceActive()
     return homeState >= 1 && homeState <= 3;
 }
 
+
+// --------------------------------------------------
+// Serwer TCP do odbioru komend
+// --------------------------------------------------
+
+
+constexpr uint16_t TCP_PORT = 5000;
+
+struct TcpCommand
+{
+    char text[112];
+};
+
+WiFiServer tcpServer(TCP_PORT);
+
+QueueHandle_t tcpCommands = nullptr;
+QueueHandle_t tabletCommands = nullptr;
+
+struct TcpResponse
+{
+    char text[128];
+};
+
+QueueHandle_t tcpResponses = nullptr;
+QueueHandle_t tcpPosition = nullptr;
+
+void sendResponse(const char* message)
+{
+    Serial.println(message);
+
+    TcpResponse response = {};
+    snprintf(response.text, sizeof(response.text), "%s\n", message);
+
+    if (strncmp(message, "POS ", 4) == 0)
+    {
+        if (tcpPosition != nullptr)
+            xQueueOverwrite(tcpPosition, &response);
+    }
+    else
+    {
+        if (tcpResponses != nullptr &&
+            xQueueSend(tcpResponses, &response, 0) != pdTRUE)
+        {
+            Serial.println("WARN TCP response queue full");
+        }
+    }
+}
+
+
+void tcpTask(void* parameter)
+{
+    bool serverStarted = false;
+
+    WiFiClient client;
+
+    char buffer[112] = {};
+    size_t length = 0;
+    bool discardLine = false;
+
+    TcpResponse pendingResponse = {};
+    size_t pendingOffset = 0;
+    bool responsePending = false;
+
+    auto resetConnection = [&]()
+    {
+        client.stop();
+
+        length = 0;
+        discardLine = false;
+
+        responsePending = false;
+        pendingOffset = 0;
+
+        // Usuwamy odpowiedzi ze starego połączenia.
+        if (tcpResponses != nullptr)
+            xQueueReset(tcpResponses);
+
+        if (tcpPosition != nullptr)
+            xQueueReset(tcpPosition);
+
+        // Usuwamy stare pozycje tabletu.
+        if (tabletCommands != nullptr)
+            xQueueReset(tabletCommands);
+
+        // Uwaga: tcpCommands nie jest tu czyszczone,
+        // bo może zawierać polecenia sterujące.
+    };
+
+    while (true)
+    {
+        // -----------------------------------------
+        // Brak Wi-Fi
+        // -----------------------------------------
+
+        if (WiFi.status() != WL_CONNECTED)
+        {
+            resetConnection();
+
+            if (serverStarted)
+            {
+                tcpServer.end();
+                serverStarted = false;
+
+                Serial.println("TCP server stopped");
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        // -----------------------------------------
+        // Wi-Fi zostało połączone
+        // -----------------------------------------
+
+        if (!serverStarted)
+        {
+            tcpServer.begin();
+            serverStarted = true;
+
+            Serial.println("TCP server ready on port 5000");
+        }
+
+        // -----------------------------------------
+        // Akceptowanie klienta
+        // -----------------------------------------
+
+        if (!client || !client.connected())
+        {
+            resetConnection();
+
+            client = tcpServer.available();
+
+            if (client && client.connected())
+            {
+                client.setNoDelay(true);
+                client.setTimeout(20);
+
+                client.println("TCP CONNECTED");
+
+                Serial.println("TCP client connected");
+            }
+        }
+
+        // -----------------------------------------
+        // Odbieranie komend
+        // -----------------------------------------
+
+        if (client && client.connected())
+        {
+            int budget = 128;
+
+            while (client.available() > 0 && budget-- > 0)
+            {
+                int value = client.read();
+
+                if (value < 0)
+                    break;
+
+                char c = static_cast<char>(value);
+
+                if (c == '\r')
+                    continue;
+
+                if (c == '\n')
+                {
+                    if (!discardLine && length > 0)
+                    {
+                        buffer[length] = '\0';
+
+                        TcpCommand command = {};
+                        memcpy(
+                            command.text,
+                            buffer,
+                            length + 1
+                        );
+
+                        if (strncmp(command.text, "tablet ", 7) == 0)
+                        {
+                            // Zachowujemy tylko najnowszy cel.
+                            if (tabletCommands != nullptr)
+                                xQueueOverwrite(
+                                    tabletCommands,
+                                    &command
+                                );
+                        }
+                        else if (strcmp(command.text, "stop") == 0)
+                        {
+                            // STOP ma pierwszeństwo.
+                            if (tcpCommands != nullptr)
+                            {
+                                if (xQueueSendToFront(
+                                        tcpCommands,
+                                        &command,
+                                        0
+                                    ) != pdTRUE)
+                                {
+                                    Serial.println(
+                                        "WARN TCP command queue full"
+                                    );
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (tcpCommands != nullptr)
+                            {
+                                if (xQueueSend(
+                                        tcpCommands,
+                                        &command,
+                                        0
+                                    ) != pdTRUE)
+                                {
+                                    Serial.println(
+                                        "WARN TCP command queue full"
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    length = 0;
+                    discardLine = false;
+                }
+                else if (!discardLine)
+                {
+                    if (length < sizeof(buffer) - 1)
+                    {
+                        buffer[length++] = c;
+                    }
+                    else
+                    {
+                        // Odrzuć całą zbyt długą linię.
+                        length = 0;
+                        discardLine = true;
+                    }
+                }
+            }
+        }
+
+        // -----------------------------------------
+        // Wysyłanie odpowiedzi do Pythona
+        // -----------------------------------------
+
+        if (client && client.connected())
+        {
+            if (!responsePending)
+            {
+                // Najpierw ważne komunikaty.
+                if (
+                    tcpResponses != nullptr &&
+                    xQueueReceive(
+                        tcpResponses,
+                        &pendingResponse,
+                        0
+                    ) == pdTRUE
+                )
+                {
+                    responsePending = true;
+                    pendingOffset = 0;
+                }
+                // Następnie najnowsza pozycja.
+                else if (
+                    tcpPosition != nullptr &&
+                    xQueueReceive(
+                        tcpPosition,
+                        &pendingResponse,
+                        0
+                    ) == pdTRUE
+                )
+                {
+                    responsePending = true;
+                    pendingOffset = 0;
+                }
+            }
+
+            if (responsePending)
+            {
+                size_t total = strlen(pendingResponse.text);
+
+                if (pendingOffset < total)
+                {
+                    size_t remaining = total - pendingOffset;
+
+                    // Na Core 0; krótki timeout.
+                    size_t written = client.write(
+                        reinterpret_cast<const uint8_t*>(
+                            pendingResponse.text + pendingOffset
+                        ),
+                        remaining
+                    );
+
+                    pendingOffset += written;
+                }
+
+                if (pendingOffset >= total)
+                {
+                    responsePending = false;
+                    pendingOffset = 0;
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+}
+
+void processTcpCommands()
+{
+    TcpCommand command;
+
+    // Najpierw komenda sterująca, np. HOME lub STOP.
+    if (tcpCommands != nullptr &&
+        xQueueReceive(tcpCommands, &command, 0) == pdTRUE)
+    {
+        serialCommandHandler.processCommand(command.text);
+    }
+
+    // Następnie tylko najnowsza pozycja tabletu.
+    if (tabletCommands != nullptr &&
+        xQueueReceive(tabletCommands, &command, 0) == pdTRUE)
+    {
+        serialCommandHandler.processCommand(command.text);
+    }
+}
+
 // --------------------------------------------------
 // setup
 // --------------------------------------------------
 
 void setup() {
+    
     Serial.begin(DEBUG_BAUD_RATE);
 
     delay(200);
@@ -252,6 +668,8 @@ void setup() {
     );
 
     delay(100);
+
+
 
     // Podstawowa konfiguracja TMC2209.
     tmc1.begin();
@@ -308,6 +726,62 @@ void setup() {
 
     pen.begin();
 
+   
+
+    setupWiFi();
+
+    
+    tcpCommands = xQueueCreate(16, sizeof(TcpCommand));
+    tabletCommands = xQueueCreate(1, sizeof(TcpCommand));
+
+    tcpResponses = xQueueCreate(32, sizeof(TcpResponse));
+    tcpPosition = xQueueCreate(1, sizeof(TcpResponse));
+
+    if (
+        tcpCommands == nullptr ||
+        tabletCommands == nullptr ||
+        tcpResponses == nullptr ||
+        tcpPosition == nullptr
+    )
+    {
+        Serial.println("TCP queue allocation failed");
+    }
+
+    else 
+    {
+        BaseType_t result = xTaskCreatePinnedToCore(
+            tcpTask,
+            "TCP",
+            6144,
+            nullptr,
+            1,
+            nullptr,
+            0
+        );
+
+        if (result != pdPASS)
+        {
+            Serial.println("TCP task creation failed");
+        }
+    }
+
+
+    BaseType_t result = xTaskCreatePinnedToCore(
+        otaTask,
+        "OTA",
+        6144,
+        nullptr,
+        1,
+        nullptr,
+        0
+    );
+
+    if (result != pdPASS)
+    {
+        Serial.println("OTA task ERROR");
+    }
+
+
     startHomeSequence();
 }
 
@@ -319,6 +793,8 @@ void setup() {
 void loop()
 {
     serialCommandHandler.readSerialCommands();
+    processTcpCommands();
+
 
     // Aktualizacja homingu
     bool homing1Finished =
@@ -369,11 +845,17 @@ void loop()
 
         if (motionManager.calculateCurrentPosition())
         {
-            Serial.printf(
-                "POS %.3f %.3f\n",
+            char message[80];
+
+            snprintf(
+                message,
+                sizeof(message),
+                "POS %.3f %.3f",
                 motionManager.getCurrentX(),
                 motionManager.getCurrentY()
             );
+
+            sendResponse(message);
         }
     }
 }
@@ -475,10 +957,6 @@ void updateHomeSequence(
                 !motion_executor2.isActive()
             )
             {
-                Serial.println(
-                    "HOME sequence finished"
-                );
-
                 homeState = 4;
 
                 motor1.setStepCount(
@@ -491,6 +969,8 @@ void updateHomeSequence(
 
                 tmc1.rms_current(INITIAL_RMS_CURRENT);
                 tmc2.rms_current(INITIAL_RMS_CURRENT);
+
+                sendResponse("HOME sequence finished");
             }
 
             
@@ -537,7 +1017,7 @@ void startHomeSequence()
 
     homeState = 1;
 
-    Serial.println("HOME sequence started");
+    sendResponse("HOME sequence started");  
 }
 
 int64_t angleToSteps(double angle)
