@@ -126,6 +126,17 @@ public:
         double speed, // mm/s
         double timeStep = 0.01);
 
+    bool generateArc(
+        double pointA_x,
+        double pointA_y,
+        double pointB_x,
+        double pointB_y,
+        double center_x,
+        double center_y,
+        bool clockwise,
+        double speed, // mm/s
+        double timeStep = 0.01);
+    
     bool startPreparedMotion();
 
     bool isTrajectoryReady();

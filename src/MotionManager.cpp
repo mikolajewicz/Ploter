@@ -331,6 +331,76 @@ bool MotionManager::line(
     return true;
 }
 
+bool MotionManager::generateArc(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double center_x,
+    double center_y,
+    bool clockwise,
+    double speed,
+    double timeStep
+)
+{
+    if (!solver.generateArc(
+            pointA_x,
+            pointA_y,
+            pointB_x,
+            pointB_y,
+            center_x,
+            center_y,
+            clockwise,
+            speed,
+            timeStep
+        ))
+    {
+        Serial.println("solver.generateArc FAILED");
+        return false;
+    }
+
+    if (!solver.compute())
+    {
+        Serial.println("solver.compute FAILED");
+        return false;
+    }
+
+    trajectoryGenerator1.takeTrajectory(
+        solver.takeMotor1Trajectory()
+    );
+
+    trajectoryGenerator2.takeTrajectory(
+        solver.takeMotor2Trajectory()
+    );
+
+    trajectoryGenerator1.convertToSteps();
+    trajectoryGenerator2.convertToSteps();
+
+    std::vector<int> prepared1 =
+        trajectoryGenerator1.takeStepTrajectory();
+
+    std::vector<int> prepared2 =
+        trajectoryGenerator2.takeStepTrajectory();
+
+    xSemaphoreTake(
+        trajectoryMutex,
+        portMAX_DELAY
+    );
+
+    nextTrajectory1 = std::move(prepared1);
+    nextTrajectory2 = std::move(prepared2);
+
+    nextTimeStep = timeStep;
+    trajectoryReady = true;
+
+    xSemaphoreGive(trajectoryMutex);
+
+    // Serial.println("LINE READY");
+
+    return true;
+}
+
+
 bool MotionManager::planLine(
     double pointA_x,
     double pointA_y,

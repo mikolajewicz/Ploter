@@ -1275,9 +1275,6 @@ def read_esp(dt):
 
         data = connection.receive().decode("ascii", errors="ignore")
 
-        if data:
-            print("TCP RX:", repr(data[:200]))
-
         if not data:
             return
 
@@ -1450,7 +1447,5 @@ pyglet.clock.schedule_interval(
     0.01
 
 )
-
-
 
 pyglet.app.run()

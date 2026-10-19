@@ -395,4 +395,61 @@ bool Kinematics::forwardKinematics(
     return true;
 }
 
-    
+bool Kinematics::generateArc(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double center_x,
+    double center_y,
+    bool clockwise,
+    double speed,
+    double timeStep
+)
+{
+    if (speed <= 0.0 || timeStep <= 0.0) {
+        return false;
+    }
+
+    double radiusA = std::hypot(pointA_x - center_x, pointA_y - center_y);
+    double radiusB = std::hypot(pointB_x - center_x, pointB_y - center_y);
+
+    if (std::abs(radiusA - radiusB) > 1e-6) {
+        return false; // Points are not on the same circle
+    }
+
+    double startAngle = std::atan2(pointA_y - center_y, pointA_x - center_x);
+    double endAngle = std::atan2(pointB_y - center_y, pointB_x - center_x);
+
+    if (clockwise && endAngle > startAngle) {
+        endAngle -= 2 * M_PI;
+    } else if (!clockwise && endAngle < startAngle) {
+        endAngle += 2 * M_PI;
+    }
+
+    double angleDiff = std::abs(endAngle - startAngle);
+    double arcLength = radiusA * angleDiff;
+    double time = arcLength / speed;
+
+    size_t samples = static_cast<size_t>(time / timeStep);
+
+    x_vect.clear();
+    y_vect.clear();
+
+    for (size_t i = 0; i <= samples; ++i) {
+        double t = i * timeStep;
+        double progress = t / time;
+        double currentAngle = startAngle + (endAngle - startAngle) * progress;
+
+        x_vect.push_back(center_x + radiusA * std::cos(currentAngle));
+        y_vect.push_back(center_y + radiusA * std::sin(currentAngle));
+    }
+
+    // Ensure the last point is exactly pointB
+    if (samples * timeStep < time) {
+        x_vect.push_back(pointB_x);
+        y_vect.push_back(pointB_y);
+    }
+
+    return true;
+}

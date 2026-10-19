@@ -41,6 +41,18 @@ public:
 
     bool forwardKinematics(double m1_angle, double m2_angle, double& x, double& y); // w stopniach
 
+    bool generateArc(
+        double pointA_x,
+        double pointA_y,
+        double pointB_x,
+        double pointB_y,
+        double center_x,
+        double center_y,
+        bool clockwise,
+        double speed, // mm/s
+        double timeStep = 0.01);
+
+        
 private:
     std::vector<double> x_vect;
     std::vector<double> y_vect;
