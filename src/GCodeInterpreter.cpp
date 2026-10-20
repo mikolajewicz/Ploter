@@ -1,10 +1,13 @@
 
 #include "GCodeInterpreter.hpp"
+#include "MotionManager.hpp"
 
 extern void sendResponse(const char* message);
 
-void GCodeInterpreter::processCommand(const String& line)
-{
+void GCodeInterpreter::processCommand(
+    const String& line,
+    MotionManager& motionManager
+){
     char buffer[112];
     line.toCharArray(buffer, sizeof(buffer));
 
@@ -58,6 +61,15 @@ void GCodeInterpreter::processCommand(const String& line)
         feedrate_ = feed;
     }
 
+    bool hasX = parser_.HasWord('X');
+    bool hasY = parser_.HasWord('Y');
+
+    if (!hasX && !hasY)
+    {
+        sendResponse("GCODE: OK");
+        return;
+    }
+
     double targetX = x_;
     double targetY = y_;
 
@@ -80,6 +92,42 @@ void GCodeInterpreter::processCommand(const String& line)
         targetX,
         targetY,
         feedrate_
+    );
+
+    sendResponse(response);
+
+    double speed = feedrate_ / 60.0;
+
+    if (speed <= 0.0)
+    {
+        sendResponse("GCODE: invalid speed");
+        return;
+    }
+
+    bool ok = motionManager.planLine(
+        x_,
+        y_,
+        targetX,
+        targetY,
+        speed,
+        0.002
+    );
+
+    if (!ok)
+    {
+        sendResponse("GCODE: motion queue full");
+        return;
+    }
+
+    snprintf(
+        response,
+        sizeof(response),
+        "GCODE QUEUED: %.3f %.3f -> %.3f %.3f speed=%.3f",
+        x_,
+        y_,
+        targetX,
+        targetY,
+        speed
     );
 
     sendResponse(response);
