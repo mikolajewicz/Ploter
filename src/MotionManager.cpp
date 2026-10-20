@@ -225,7 +225,19 @@ void MotionManager::plannerTask()
                 );
                 break;
 
-                
+            case MotionType::ARC:   
+                success = generateArc(
+                    request.pointA_x,
+                    request.pointA_y,
+                    request.pointB_x,
+                    request.pointB_y,
+                    request.center_x,
+                    request.center_y,
+                    request.clockwise,
+                    request.value,
+                    request.timeStep
+                );
+                break;      
         }
 
         if (!success)
@@ -432,6 +444,48 @@ bool MotionManager::planLine(
         0
     ) == pdTRUE;
 
+}
+
+bool MotionManager::planArc(
+    double pointA_x,
+    double pointA_y,
+    double pointB_x,
+    double pointB_y,
+    double center_x,
+    double center_y,
+    bool clockwise,
+    double speed,
+    double timeStep
+)
+{
+    if (motionQueue == nullptr)
+    {
+        return false;
+    }
+
+    MotionRequest request;
+
+    request.type = MotionType::ARC;
+
+    request.pointA_x = pointA_x;
+    request.pointA_y = pointA_y;
+
+    request.pointB_x = pointB_x;
+    request.pointB_y = pointB_y;
+
+    request.center_x = center_x;
+    request.center_y = center_y;
+
+    request.clockwise = clockwise;
+
+    request.value = speed;
+    request.timeStep = timeStep;
+
+    return xQueueSend(
+        motionQueue,
+        &request,
+        0
+    ) == pdTRUE;
 }
 
 void MotionManager::setLiveTarget(

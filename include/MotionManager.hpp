@@ -47,10 +47,12 @@ private:
     enum class MotionType
     {
         A2B,
-        LINE
+        LINE,
+        ARC
     };
 
-    struct MotionRequest{
+    struct MotionRequest
+    {
         MotionType type;
 
         double pointA_x;
@@ -59,7 +61,15 @@ private:
         double pointB_x;
         double pointB_y;
 
-        double value;    // A2B  -> time, LINE -> speed
+        double center_x;
+        double center_y;
+
+        bool clockwise;
+
+        // A2B -> time
+        // LINE -> speed
+        // ARC -> speed
+        double value;
 
         double timeStep;
     };
@@ -159,6 +169,18 @@ public:
     double pointB_y,
     double speed,
     double timeStep
+    );
+
+    bool planArc(
+        double pointA_x,
+        double pointA_y,
+        double pointB_x,
+        double pointB_y,
+        double center_x,
+        double center_y,
+        bool clockwise,
+        double speed,
+        double timeStep
     );
 
     void setLiveTarget(

@@ -1,4 +1,3 @@
-
 #include "GCodeInterpreter.hpp"
 #include "MotionManager.hpp"
 
@@ -7,13 +6,20 @@ extern void sendResponse(const char* message);
 void GCodeInterpreter::processCommand(
     const String& line,
     MotionManager& motionManager
-){
+)
+{
     char buffer[112];
     line.toCharArray(buffer, sizeof(buffer));
 
     parser_.ParseLine(buffer);
 
-    char response[128];
+    char response[160];
+
+    int motionCode = -1;
+
+    // --------------------------------------------------
+    // G
+    // --------------------------------------------------
 
     if (parser_.HasWord('G'))
     {
@@ -21,117 +27,308 @@ void GCodeInterpreter::processCommand(
             parser_.GetWordValue('G')
         );
 
+        // G90 - współrzędne absolutne
         if (g == 90)
         {
             absoluteMode_ = true;
-            sendResponse("GCODE: G90 absolute mode");
+
+            sendResponse(
+                "GCODE: G90 absolute mode"
+            );
+
             return;
         }
 
+        // G91 - współrzędne względne
         if (g == 91)
         {
             absoluteMode_ = false;
-            sendResponse("GCODE: G91 relative mode");
+
+            sendResponse(
+                "GCODE: G91 relative mode"
+            );
+
             return;
         }
 
+        // G21 - milimetry
         if (g == 21)
         {
-            sendResponse("GCODE: G21 millimeters");
+            sendResponse(
+                "GCODE: G21 millimeters"
+            );
+
             return;
         }
 
-        if (g != 0 && g != 1)
+        // Obsługiwane ruchy:
+        //
+        // G0 - linia
+        // G1 - linia
+        // G2 - łuk CW
+        // G3 - łuk CCW
+
+        if (
+            g != 0 &&
+            g != 1 &&
+            g != 2 &&
+            g != 3
+        )
         {
-            sendResponse("GCODE: unsupported G");
+            sendResponse(
+                "GCODE: unsupported G"
+            );
+
             return;
         }
+
+        motionCode = g;
     }
+
+    // --------------------------------------------------
+    // Feedrate
+    // --------------------------------------------------
 
     if (parser_.HasWord('F'))
     {
-        double feed = parser_.GetWordValue('F');
+        double feed =
+            parser_.GetWordValue('F');
 
         if (feed <= 0.0)
         {
-            sendResponse("GCODE: invalid feedrate");
+            sendResponse(
+                "GCODE: invalid feedrate"
+            );
+
             return;
         }
 
         feedrate_ = feed;
     }
 
-    bool hasX = parser_.HasWord('X');
-    bool hasY = parser_.HasWord('Y');
-
-    if (!hasX && !hasY)
+    // Samo F jest dozwolone
+    if (motionCode == -1)
     {
         sendResponse("GCODE: OK");
         return;
     }
 
-    double targetX = x_;
-    double targetY = y_;
+    // --------------------------------------------------
+    // Aktualna pozycja plotera
+    // --------------------------------------------------
+
+    if (!motionManager.calculateCurrentPosition())
+    {
+        sendResponse(
+            "GCODE: cannot calculate current position"
+        );
+
+        return;
+    }
+
+    double currentX =
+        motionManager.getCurrentX();
+
+    double currentY =
+        motionManager.getCurrentY();
+
+    double targetX = currentX;
+    double targetY = currentY;
+
+    // --------------------------------------------------
+    // X
+    // --------------------------------------------------
 
     if (parser_.HasWord('X'))
     {
-        double x = parser_.GetWordValue('X');
-        targetX = absoluteMode_ ? x : x_ + x;
+        double x =
+            parser_.GetWordValue('X');
+
+        targetX =
+            absoluteMode_
+            ? x
+            : currentX + x;
     }
+
+    // --------------------------------------------------
+    // Y
+    // --------------------------------------------------
 
     if (parser_.HasWord('Y'))
     {
-        double y = parser_.GetWordValue('Y');
-        targetY = absoluteMode_ ? y : y_ + y;
+        double y =
+            parser_.GetWordValue('Y');
+
+        targetY =
+            absoluteMode_
+            ? y
+            : currentY + y;
     }
 
-    snprintf(
-        response,
-        sizeof(response),
-        "GCODE: X=%.3f Y=%.3f F=%.1f",
-        targetX,
-        targetY,
-        feedrate_
-    );
+    // --------------------------------------------------
+    // Prędkość
+    //
+    // G-code F = mm/min
+    // MotionManager = mm/s
+    // --------------------------------------------------
 
-    sendResponse(response);
-
-    double speed = feedrate_ / 60.0;
+    double speed =
+        feedrate_ / 60.0;
 
     if (speed <= 0.0)
     {
-        sendResponse("GCODE: invalid speed");
+        sendResponse(
+            "GCODE: invalid speed"
+        );
+
         return;
     }
 
-    bool ok = motionManager.planLine(
-        x_,
-        y_,
-        targetX,
-        targetY,
-        speed,
-        0.002
-    );
+    // ==================================================
+    // G0 / G1
+    // ==================================================
 
-    if (!ok)
+    if (
+        motionCode == 0 ||
+        motionCode == 1
+    )
     {
-        sendResponse("GCODE: motion queue full");
+        bool hasX =
+            parser_.HasWord('X');
+
+        bool hasY =
+            parser_.HasWord('Y');
+
+        if (!hasX && !hasY)
+        {
+            sendResponse(
+                "GCODE: no movement"
+            );
+
+            return;
+        }
+
+        bool ok =
+            motionManager.planLine(
+                currentX,
+                currentY,
+                targetX,
+                targetY,
+                speed,
+                0.002
+            );
+
+        if (!ok)
+        {
+            sendResponse(
+                "GCODE: motion queue full"
+            );
+
+            return;
+        }
+
+        snprintf(
+            response,
+            sizeof(response),
+            "GCODE LINE: G%d %.3f %.3f -> %.3f %.3f speed=%.3f",
+            motionCode,
+            currentX,
+            currentY,
+            targetX,
+            targetY,
+            speed
+        );
+
+        sendResponse(response);
+
+        x_ = targetX;
+        y_ = targetY;
+
         return;
     }
 
-    snprintf(
-        response,
-        sizeof(response),
-        "GCODE QUEUED: %.3f %.3f -> %.3f %.3f speed=%.3f",
-        x_,
-        y_,
-        targetX,
-        targetY,
-        speed
-    );
+    // ==================================================
+    // G2 / G3
+    // ==================================================
 
-    sendResponse(response);
+    if (
+        motionCode == 2 ||
+        motionCode == 3
+    )
+    {
+        // Na razie wymagamy I oraz J.
+        //
+        // I = przesunięcie środka względem start X
+        // J = przesunięcie środka względem start Y
 
-    x_ = targetX;
-    y_ = targetY;
+        if (
+            !parser_.HasWord('I') ||
+            !parser_.HasWord('J')
+        )
+        {
+            sendResponse(
+                "GCODE: G2/G3 requires I and J"
+            );
+
+            return;
+        }
+
+        double i =
+            parser_.GetWordValue('I');
+
+        double j =
+            parser_.GetWordValue('J');
+
+        double centerX =
+            currentX + i;
+
+        double centerY =
+            currentY + j;
+
+        bool clockwise =
+            motionCode == 2;
+
+        bool ok =
+            motionManager.planArc(
+                currentX,
+                currentY,
+                targetX,
+                targetY,
+                centerX,
+                centerY,
+                clockwise,
+                speed,
+                0.002
+            );
+
+        if (!ok)
+        {
+            sendResponse(
+                "GCODE: arc queue full"
+            );
+
+            return;
+        }
+
+        snprintf(
+            response,
+            sizeof(response),
+            "GCODE ARC: G%d %.3f %.3f -> %.3f %.3f center=%.3f %.3f speed=%.3f",
+            motionCode,
+            currentX,
+            currentY,
+            targetX,
+            targetY,
+            centerX,
+            centerY,
+            speed
+        );
+
+        sendResponse(response);
+
+        x_ = targetX;
+        y_ = targetY;
+
+        return;
+    }
 }
