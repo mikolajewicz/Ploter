@@ -197,5 +197,8 @@ public:
     bool followTarget();
 
     void clearLiveTarget();
+
+    void penUp(){ pen.up(); }
+    void penDown(){ pen.down(); }
 };
 

@@ -1,5 +1,7 @@
 #include "Kinematics.hpp"
 
+extern void sendResponse(const char* message);
+
 Kinematics::Kinematics()
 {
     // Constructor implementation (if needed)
@@ -414,8 +416,26 @@ bool Kinematics::generateArc(
     double radiusA = std::hypot(pointA_x - center_x, pointA_y - center_y);
     double radiusB = std::hypot(pointB_x - center_x, pointB_y - center_y);
 
-    if (std::abs(radiusA - radiusB) > 1e-6) {
-        return false; // Points are not on the same circle
+    constexpr double radiusTolerance = 0.5;
+
+    if (
+        std::abs(radiusA - radiusB)
+        > radiusTolerance
+    )
+    {
+        char message[128];
+
+        snprintf(
+            message,
+            sizeof(message),
+            "ERR ARC radius mismatch: R1=%.6f R2=%.6f",
+            radiusA,
+            radiusB
+        );
+
+        sendResponse(message);
+
+        return false;
     }
 
     double startAngle = std::atan2(pointA_y - center_y, pointA_x - center_x);

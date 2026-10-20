@@ -8,14 +8,59 @@ void GCodeInterpreter::processCommand(
     MotionManager& motionManager
 )
 {
+    String normalizedLine = line;
+    normalizedLine.toUpperCase();
+
     char buffer[112];
-    line.toCharArray(buffer, sizeof(buffer));
+    normalizedLine.toCharArray(
+        buffer,
+        sizeof(buffer)
+    );
 
     parser_.ParseLine(buffer);
 
     char response[160];
 
     int motionCode = -1;
+
+    // --------------------------------------------------
+    // M-CODE
+    // --------------------------------------------------
+
+    if (parser_.HasWord('M'))
+    {
+        int m = static_cast<int>(
+            parser_.GetWordValue('M')
+        );
+
+        if (m == 3)
+        {
+            motionManager.penDown();
+
+            sendResponse(
+                "OK M3 pen down"
+            );
+
+            return;
+        }
+
+        if (m == 5)
+        {
+            motionManager.penUp();
+
+            sendResponse(
+                "OK M5 pen up"
+            );
+
+            return;
+        }
+
+        sendResponse(
+            "ERR unsupported M-code"
+        );
+
+        return;
+    }
 
     // --------------------------------------------------
     // G

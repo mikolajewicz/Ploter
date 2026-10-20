@@ -52,9 +52,59 @@ WINDOW_WIDTH = 1485 #990
 WINDOW_HEIGHT = 1000 #700
 
 
+A4_RATIO = A4_WIDTH_MM / A4_HEIGHT_MM
+
+page_x = 0.0
+page_y = 0.0
+page_width = WINDOW_WIDTH
+page_height = WINDOW_HEIGHT
+
+page_scale = 1.0
+
+def update_page_layout(width, height):
+    global page_x, page_y
+    global page_width, page_height
+    global page_scale
+    global left, right, bottom, top
+
+    window_ratio = width / height
+
+    if window_ratio > A4_RATIO:
+        # okno jest za szerokie
+        page_height = height
+        page_width = page_height * A4_RATIO
+    else:
+        # okno jest za wysokie
+        page_width = width
+        page_height = page_width / A4_RATIO
+
+    # wyśrodkowanie kartki
+    page_x = (width - page_width) / 2.0
+    page_y = (height - page_height) / 2.0
+
+    # ile pikseli odpowiada 1 mm
+    page_scale = page_width / A4_WIDTH_MM
+
+    # margines 10 mm
+    left = page_x + MARGIN_MM * page_scale
+    right = page_x + page_width - MARGIN_MM * page_scale
+
+    bottom = page_y + MARGIN_MM * page_scale
+    top = page_y + page_height - MARGIN_MM * page_scale
 
 
+def screen_to_page_mm(x, y):
+    x_mm = (x - page_x) / page_scale
+    y_mm = (y - page_y) / page_scale
 
+    return x_mm, y_mm
+
+
+def page_mm_to_screen(x_mm, y_mm):
+    screen_x = page_x + x_mm * page_scale
+    screen_y = page_y + y_mm * page_scale
+
+    return screen_x, screen_y
 # --------------------------------------------------
 
 # Serial
@@ -157,13 +207,15 @@ DEBUG_POS = True
 def plotter_to_screen(x_mm, y_mm):
 
     screen_x = (
-        WINDOW_WIDTH / 2
-        + x_mm * (WINDOW_WIDTH - 1) / A4_WIDTH_MM
+        page_x
+        + page_width / 2.0
+        + x_mm * page_scale
     )
 
     screen_y = (
-        WINDOW_HEIGHT / 2
-        + y_mm * (WINDOW_HEIGHT - 1) / A4_HEIGHT_MM
+        page_y
+        + page_height / 2.0
+        + y_mm * page_scale
     )
 
     return screen_x, screen_y
@@ -255,7 +307,7 @@ window = pyglet.window.Window(
 
     caption="Ploter - Wacom / Terminal",
 
-    resizable=False
+    resizable=True
 
 )
 
@@ -397,34 +449,34 @@ PRESSURE_THRESHOLD = 0.01
 
 
 
-margin_x_px = (
+def update_margin_lines():
 
-    MARGIN_MM / A4_WIDTH_MM
+    margin_lines[0].x = left
+    margin_lines[0].y = bottom
+    margin_lines[0].x2 = right
+    margin_lines[0].y2 = bottom
 
-    * WINDOW_WIDTH
+    margin_lines[1].x = right
+    margin_lines[1].y = bottom
+    margin_lines[1].x2 = right
+    margin_lines[1].y2 = top
 
+    margin_lines[2].x = right
+    margin_lines[2].y = top
+    margin_lines[2].x2 = left
+    margin_lines[2].y2 = top
+
+    margin_lines[3].x = left
+    margin_lines[3].y = top
+    margin_lines[3].x2 = left
+    margin_lines[3].y2 = bottom
+
+
+
+update_page_layout(
+    WINDOW_WIDTH,
+    WINDOW_HEIGHT
 )
-
-
-
-margin_y_px = (
-
-    MARGIN_MM / A4_HEIGHT_MM
-
-    * WINDOW_HEIGHT
-
-)
-
-
-
-left = margin_x_px
-
-right = WINDOW_WIDTH - margin_x_px
-
-bottom = margin_y_px
-
-top = WINDOW_HEIGHT - margin_y_px
-
 
 
 margin_lines = [
@@ -709,23 +761,22 @@ def clear_drawing():
 
 
 
-    for line in lines:
-
-        line.delete()
-
-
-
-    lines.clear()
+    for segment in lines:
+        segment["shape"].delete()
 
 
 
-    last_x = None
-
-    last_y = None
+        lines.clear()
 
 
 
-    print("Wyczyszczono kartkę")
+        last_x = None
+
+        last_y = None
+
+
+
+        print("Wyczyszczono kartkę")
 
 
 
@@ -955,27 +1006,7 @@ def setup_tablet_handlers(canvas):
 
 
 
-        x_mm = (
-
-            x /
-
-            (WINDOW_WIDTH - 1) *
-
-            A4_WIDTH_MM
-
-        )
-
-
-
-        y_mm = (
-
-            y /
-
-            (WINDOW_HEIGHT - 1) *
-
-            A4_HEIGHT_MM
-
-        )
+        x_mm, y_mm = screen_to_page_mm(x, y)
 
 
 
@@ -1038,60 +1069,77 @@ def setup_tablet_handlers(canvas):
 
 
         if (
-
             pressure > PRESSURE_THRESHOLD
-
             and inside_page
-
         ):
 
             if (
-
                 last_x is not None
-
                 and last_y is not None
-
             ):
 
-                line = shapes.Line(
-
+                x1_screen, y1_screen = page_mm_to_screen(
                     last_x,
-
-                    last_y,
-
-                    x,
-
-                    y,
-
-                    thickness=2,
-
-                    color=(0, 0, 0),
-
-                    batch=drawing_batch
-
+                    last_y
                 )
 
+                x2_screen, y2_screen = page_mm_to_screen(
+                    x_mm,
+                    y_mm
+                )
 
+                line = shapes.Line(
+                    x1_screen,
+                    y1_screen,
+                    x2_screen,
+                    y2_screen,
+                    thickness=2,
+                    color=(0, 0, 0),
+                    batch=drawing_batch
+                )
 
-                lines.append(line)
+                lines.append(
+                    {
+                        "shape": line,
+                        "x1_mm": last_x,
+                        "y1_mm": last_y,
+                        "x2_mm": x_mm,
+                        "y2_mm": y_mm
+                    }
+                )
 
-
-
-            last_x = x
-
-            last_y = y
-
-
+            # UWAGA:
+            # od teraz last_x i last_y przechowują milimetry,
+            # a nie piksele
+            last_x = x_mm
+            last_y = y_mm
 
         else:
 
             last_x = None
-
             last_y = None
 
 
 
+def update_drawing_lines():
 
+    for segment in lines:
+
+        x1, y1 = page_mm_to_screen(
+            segment["x1_mm"],
+            segment["y1_mm"]
+        )
+
+        x2, y2 = page_mm_to_screen(
+            segment["x2_mm"],
+            segment["y2_mm"]
+        )
+
+        segment["shape"].x = x1
+        segment["shape"].y = y1
+
+        segment["shape"].x2 = x2
+        segment["shape"].y2 = y2
 
 # --------------------------------------------------
 
@@ -1330,6 +1378,51 @@ def is_inside_rectangle(x, y, rect):
 
     )
 
+
+@window.event
+def on_resize(width, height):
+
+    update_page_layout(width, height)
+
+    update_margin_lines()
+
+    # przycisk WYCZYŚĆ
+    clear_button.y = height - 30
+
+    clear_label.x = (
+        clear_button.x
+        + clear_button.width / 2
+    )
+
+    clear_label.y = (
+        clear_button.y
+        + clear_button.height / 2
+    )
+
+    # HOME
+    home_button.x = (
+        width
+        - HOME_BUTTON_WIDTH
+        - HOME_BUTTON_MARGIN
+    )
+
+    home_button.y = (
+        height
+        - HOME_BUTTON_HEIGHT
+        - HOME_BUTTON_MARGIN
+    )
+
+    home_label.x = (
+        home_button.x
+        + home_button.width / 2
+    )
+
+    home_label.y = (
+        home_button.y
+        + home_button.height / 2
+    )
+
+    update_drawing_lines()  
 
 
 @window.event
