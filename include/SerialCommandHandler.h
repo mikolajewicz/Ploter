@@ -7,6 +7,7 @@
 #include "MotionExecutor.hpp"
 #include "TrajectoryGenerator.hpp"
 #include "Homing.hpp"
+#include "GCodeInterpreter.hpp"
 
 class MotionManager;
 
@@ -55,6 +56,8 @@ private:
 
     bool motionCommandPending_ = false;
     uint32_t motionCommandQueuedAt_ = 0;
+
+    GCodeInterpreter gcodeInterpreter_;
 
 public:
     SerialCommandHandler(

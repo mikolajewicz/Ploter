@@ -279,6 +279,21 @@ void SerialCommandHandler::handleSerialCommand(
         return;
     }
 
+    // --------------------------------------------
+    // GCODE
+    // --------------------------------------------
+
+    if (group == "gcode")
+    {
+        if (rest.isEmpty())
+        {
+            sendResponse("ERR EMPTY GCODE");
+            return;
+        }
+
+        gcodeInterpreter_.processCommand(rest);
+        return;
+    }
 
     // --------------------------------------------
     // TABLET
