@@ -291,7 +291,7 @@ void SerialCommandHandler::handleSerialCommand(
             return;
         }
 
-        gcodeInterpreter_.processCommand(rest);
+        gcodeInterpreter_.processCommand(rest, motionManager);
         return;
     }
 

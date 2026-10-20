@@ -15,7 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
-void testGCode();
+// void testGCode();
 
 // --------------------------------------------------
 // Konfiguracja WIFI
@@ -456,7 +456,7 @@ void tcpTask(void* parameter)
 
                 Serial.println("TCP client connected");
 
-                testGCode();
+                // testGCode();
             }
 
             
