@@ -15,6 +15,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
+constexpr bool BYPASS_HOME = true;
+
 // void testGCode();
 
 // --------------------------------------------------
@@ -1003,17 +1005,44 @@ void updateHomeSequence(
 }
 
 void startHomeSequence()
+
 {
     motionManager.clearLiveTarget();
-
-    motor1Homed = false;
-    motor2Homed = false;
 
     motion_executor1.stop();
     motion_executor2.stop();
 
     motor1.stop();
     motor2.stop();
+
+    if (BYPASS_HOME)
+    {
+        motor1Homed = true;
+        motor2Homed = true;
+
+        motor1.enable();
+        motor2.enable();
+
+        // Bardzo ważne:
+        // ustawiamy logiczną pozycję tak samo
+        // jak po prawdziwym homingu.
+        motor1.setStepCount(
+            angleToSteps(HOME_ANGLE_M1)
+        );
+
+        motor2.setStepCount(
+            angleToSteps(HOME_ANGLE_M2)
+        );
+
+        homeState = 4;
+
+        sendResponse("HOME sequence finished");
+        return;
+    }
+
+
+    motor1Homed = false;
+    motor2Homed = false;
 
     motor1.enable();
     motor2.enable();
@@ -1023,7 +1052,7 @@ void startHomeSequence()
 
     homeState = 1;
 
-    sendResponse("HOME sequence started");  
+    sendResponse("HOME sequence started");
 }
 
 int64_t angleToSteps(double angle)

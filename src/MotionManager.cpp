@@ -488,6 +488,24 @@ bool MotionManager::planArc(
     ) == pdTRUE;
 }
 
+void MotionManager::startPause(uint32_t durationMs)
+{
+    pauseActive = true;
+    pauseStart = millis();
+    pauseDuration = durationMs;
+}
+
+void MotionManager::updatePause()
+{
+    if (!pauseActive)
+        return;
+
+    if (millis() - pauseStart >= pauseDuration)
+    {
+        pauseActive = false;
+    }
+}
+
 void MotionManager::setLiveTarget(
     double x,
     double y,
