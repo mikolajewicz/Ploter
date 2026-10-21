@@ -14,8 +14,9 @@
 #include <ArduinoOTA.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include <LittleFS.h>
 
-constexpr bool BYPASS_HOME = true;
+constexpr bool BYPASS_HOME = false;
 
 // void testGCode();
 
@@ -365,9 +366,15 @@ void sendResponse(const char* message)
     }
 }
 
-
 void tcpTask(void* parameter)
 {
+    File gcodeUploadFile;
+
+    bool gcodeUploadActive = false;
+
+    size_t gcodeUploadRemaining = 0;
+    size_t gcodeUploadTotal = 0;
+
     bool serverStarted = false;
 
     WiFiClient client;
@@ -380,8 +387,31 @@ void tcpTask(void* parameter)
     size_t pendingOffset = 0;
     bool responsePending = false;
 
+
+    // --------------------------------------------------
+    // Reset połączenia
+    // --------------------------------------------------
+
     auto resetConnection = [&]()
     {
+        // Jeżeli trwał upload, zamknij plik.
+        if (gcodeUploadFile)
+        {
+            gcodeUploadFile.close();
+        }
+
+        // Niedokończony upload jest nieważny.
+        if (gcodeUploadActive)
+        {
+            LittleFS.remove(
+                "/job.tmp"
+            );
+        }
+
+        gcodeUploadActive = false;
+        gcodeUploadRemaining = 0;
+        gcodeUploadTotal = 0;
+
         client.stop();
 
         length = 0;
@@ -392,24 +422,40 @@ void tcpTask(void* parameter)
 
         // Usuwamy odpowiedzi ze starego połączenia.
         if (tcpResponses != nullptr)
-            xQueueReset(tcpResponses);
+        {
+            xQueueReset(
+                tcpResponses
+            );
+        }
 
         if (tcpPosition != nullptr)
-            xQueueReset(tcpPosition);
+        {
+            xQueueReset(
+                tcpPosition
+            );
+        }
 
         // Usuwamy stare pozycje tabletu.
         if (tabletCommands != nullptr)
-            xQueueReset(tabletCommands);
+        {
+            xQueueReset(
+                tabletCommands
+            );
+        }
 
-        // Uwaga: tcpCommands nie jest tu czyszczone,
-        // bo może zawierać polecenia sterujące.
+        // tcpCommands celowo nie czyścimy.
     };
+
+
+    // --------------------------------------------------
+    // Główna pętla TCP
+    // --------------------------------------------------
 
     while (true)
     {
-        // -----------------------------------------
+        // --------------------------------------------------
         // Brak Wi-Fi
-        // -----------------------------------------
+        // --------------------------------------------------
 
         if (WiFi.status() != WL_CONNECTED)
         {
@@ -420,102 +466,405 @@ void tcpTask(void* parameter)
                 tcpServer.end();
                 serverStarted = false;
 
-                Serial.println("TCP server stopped");
+                Serial.println(
+                    "TCP server stopped"
+                );
             }
 
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(
+                pdMS_TO_TICKS(100)
+            );
+
             continue;
         }
 
-        // -----------------------------------------
-        // Wi-Fi zostało połączone
-        // -----------------------------------------
+
+        // --------------------------------------------------
+        // Uruchomienie serwera po połączeniu Wi-Fi
+        // --------------------------------------------------
 
         if (!serverStarted)
         {
             tcpServer.begin();
             serverStarted = true;
 
-            Serial.println("TCP server ready on port 5000");
+            Serial.println(
+                "TCP server ready on port 5000"
+            );
         }
 
-        // -----------------------------------------
+
+        // --------------------------------------------------
         // Akceptowanie klienta
-        // -----------------------------------------
+        // --------------------------------------------------
 
         if (!client || !client.connected())
         {
             resetConnection();
 
-            client = tcpServer.available();
+            client =
+                tcpServer.available();
 
-            if (client && client.connected())
+            if (
+                client &&
+                client.connected()
+            )
             {
                 client.setNoDelay(true);
                 client.setTimeout(20);
 
-                client.println("TCP CONNECTED");
+                client.println(
+                    "TCP CONNECTED"
+                );
 
-                Serial.println("TCP client connected");
-
-                // testGCode();
+                Serial.println(
+                    "TCP client connected"
+                );
             }
-
-            
         }
 
-        // -----------------------------------------
-        // Odbieranie komend
-        // -----------------------------------------
 
-        if (client && client.connected())
+        // --------------------------------------------------
+        // Odbieranie danych
+        // --------------------------------------------------
+
+        if (
+            client &&
+            client.connected()
+        )
         {
             int budget = 128;
 
-            while (client.available() > 0 && budget-- > 0)
+            while (
+                client.available() > 0 &&
+                budget-- > 0
+            )
             {
-                int value = client.read();
+                int value =
+                    client.read();
 
                 if (value < 0)
+                {
                     break;
+                }
 
-                char c = static_cast<char>(value);
+                char c =
+                    static_cast<char>(
+                        value
+                    );
+
+
+                // ==========================================
+                // TRYB UPLOADU G-CODE
+                // ==========================================
+
+                if (gcodeUploadActive)
+                {
+                    if (!gcodeUploadFile)
+                    {
+                        gcodeUploadActive = false;
+
+                        gcodeUploadRemaining = 0;
+                        gcodeUploadTotal = 0;
+
+                        LittleFS.remove(
+                            "/job.tmp"
+                        );
+
+                        sendResponse(
+                            "ERR GCODE FILE"
+                        );
+
+                        continue;
+                    }
+
+
+                    size_t written =
+                        gcodeUploadFile.write(
+                            static_cast<uint8_t>(
+                                c
+                            )
+                        );
+
+
+                    // Nie udało się zapisać bajtu.
+                    if (written != 1)
+                    {
+                        gcodeUploadFile.close();
+
+                        LittleFS.remove(
+                            "/job.tmp"
+                        );
+
+                        gcodeUploadActive = false;
+
+                        gcodeUploadRemaining = 0;
+                        gcodeUploadTotal = 0;
+
+                        sendResponse(
+                            "ERR GCODE WRITE"
+                        );
+
+                        continue;
+                    }
+
+
+                    // Jeden bajt mniej do odebrania.
+                    gcodeUploadRemaining--;
+
+
+                    // --------------------------------------
+                    // Cały plik odebrany
+                    // --------------------------------------
+
+                    if (
+                        gcodeUploadRemaining == 0
+                    )
+                    {
+                        gcodeUploadFile.close();
+
+                        gcodeUploadActive = false;
+
+
+                        // Stary poprawny program usuwamy
+                        // dopiero po odebraniu całego nowego.
+                        LittleFS.remove(
+                            "/job.gcode"
+                        );
+
+
+                        bool renamed =
+                            LittleFS.rename(
+                                "/job.tmp",
+                                "/job.gcode"
+                            );
+
+
+                        if (renamed)
+                        {
+                            char response[80];
+
+                            snprintf(
+                                response,
+                                sizeof(response),
+                                "GCODE STORED %u",
+                                static_cast<unsigned>(
+                                    gcodeUploadTotal
+                                )
+                            );
+
+                            sendResponse(
+                                response
+                            );
+                        }
+                        else
+                        {
+                            LittleFS.remove(
+                                "/job.tmp"
+                            );
+
+                            sendResponse(
+                                "ERR GCODE RENAME"
+                            );
+                        }
+
+
+                        gcodeUploadRemaining = 0;
+                        gcodeUploadTotal = 0;
+                    }
+
+
+                    // Bardzo ważne:
+                    // bajt należał do pliku,
+                    // więc nie trafia do parsera komend.
+                    continue;
+                }
+
+
+                // ==========================================
+                // NORMALNY TRYB KOMEND TCP
+                // ==========================================
 
                 if (c == '\r')
+                {
                     continue;
+                }
+
+
+                // ------------------------------------------
+                // Koniec linii
+                // ------------------------------------------
 
                 if (c == '\n')
                 {
-                    if (!discardLine && length > 0)
+                    if (
+                        !discardLine &&
+                        length > 0
+                    )
                     {
                         buffer[length] = '\0';
 
+
                         TcpCommand command = {};
+
                         memcpy(
                             command.text,
                             buffer,
                             length + 1
                         );
 
-                        if (strncmp(command.text, "tablet ", 7) == 0)
+
+                        // ==================================
+                        // GCODE_UPLOAD
+                        // ==================================
+
+                        if (
+                            strncmp(
+                                command.text,
+                                "GCODE_UPLOAD ",
+                                13
+                            ) == 0
+                        )
                         {
-                            // Zachowujemy tylko najnowszy cel.
-                            if (tabletCommands != nullptr)
+                            char* endPointer =
+                                nullptr;
+
+
+                            unsigned long size =
+                                strtoul(
+                                    command.text + 13,
+                                    &endPointer,
+                                    10
+                                );
+
+
+                            // Sprawdzenie poprawności liczby.
+                            if (
+                                endPointer
+                                    == command.text + 13
+                                ||
+                                *endPointer != '\0'
+                                ||
+                                size == 0
+                            )
+                            {
+                                sendResponse(
+                                    "ERR GCODE SIZE"
+                                );
+                            }
+                            else
+                            {
+                                // Na wszelki wypadek.
+                                if (gcodeUploadFile)
+                                {
+                                    gcodeUploadFile.close();
+                                }
+
+
+                                // Usuwamy stary niedokończony
+                                // upload.
+                                LittleFS.remove(
+                                    "/job.tmp"
+                                );
+
+
+                                gcodeUploadFile =
+                                    LittleFS.open(
+                                        "/job.tmp",
+                                        "w"
+                                    );
+
+
+                                if (!gcodeUploadFile)
+                                {
+                                    sendResponse(
+                                        "ERR GCODE OPEN"
+                                    );
+                                }
+                                else
+                                {
+                                    gcodeUploadTotal =
+                                        static_cast<size_t>(
+                                            size
+                                        );
+
+                                    gcodeUploadRemaining =
+                                        gcodeUploadTotal;
+
+                                    gcodeUploadActive =
+                                        true;
+
+
+                                    char response[80];
+
+                                    snprintf(
+                                        response,
+                                        sizeof(response),
+                                        "GCODE READY %u",
+                                        static_cast<unsigned>(
+                                            gcodeUploadTotal
+                                        )
+                                    );
+
+                                    sendResponse(
+                                        response
+                                    );
+                                }
+                            }
+                        }
+
+
+                        // ==================================
+                        // TABLET
+                        // ==================================
+
+                        else if (
+                            strncmp(
+                                command.text,
+                                "tablet ",
+                                7
+                            ) == 0
+                        )
+                        {
+                            // Zachowujemy tylko
+                            // najnowszy cel tabletu.
+                            if (
+                                tabletCommands
+                                != nullptr
+                            )
+                            {
                                 xQueueOverwrite(
                                     tabletCommands,
                                     &command
                                 );
+                            }
                         }
-                        else if (strcmp(command.text, "stop") == 0)
+
+
+                        // ==================================
+                        // STOP
+                        // ==================================
+
+                        else if (
+                            strcmp(
+                                command.text,
+                                "stop"
+                            ) == 0
+                        )
                         {
                             // STOP ma pierwszeństwo.
-                            if (tcpCommands != nullptr)
+                            if (
+                                tcpCommands
+                                != nullptr
+                            )
                             {
-                                if (xQueueSendToFront(
+                                if (
+                                    xQueueSendToFront(
                                         tcpCommands,
                                         &command,
                                         0
-                                    ) != pdTRUE)
+                                    ) != pdTRUE
+                                )
                                 {
                                     Serial.println(
                                         "WARN TCP command queue full"
@@ -523,15 +872,26 @@ void tcpTask(void* parameter)
                                 }
                             }
                         }
+
+
+                        // ==================================
+                        // POZOSTAŁE KOMENDY
+                        // ==================================
+
                         else
                         {
-                            if (tcpCommands != nullptr)
+                            if (
+                                tcpCommands
+                                != nullptr
+                            )
                             {
-                                if (xQueueSend(
+                                if (
+                                    xQueueSend(
                                         tcpCommands,
                                         &command,
                                         0
-                                    ) != pdTRUE)
+                                    ) != pdTRUE
+                                )
                                 {
                                     Serial.println(
                                         "WARN TCP command queue full"
@@ -541,18 +901,30 @@ void tcpTask(void* parameter)
                         }
                     }
 
+
+                    // Przygotowanie na następną linię.
                     length = 0;
                     discardLine = false;
                 }
+
+
+                // ------------------------------------------
+                // Zwykły znak linii
+                // ------------------------------------------
+
                 else if (!discardLine)
                 {
-                    if (length < sizeof(buffer) - 1)
+                    if (
+                        length
+                        < sizeof(buffer) - 1
+                    )
                     {
                         buffer[length++] = c;
                     }
                     else
                     {
-                        // Odrzuć całą zbyt długą linię.
+                        // Linia za długa.
+                        // Odrzucamy ją aż do następnego \n.
                         length = 0;
                         discardLine = true;
                     }
@@ -560,11 +932,15 @@ void tcpTask(void* parameter)
             }
         }
 
-        // -----------------------------------------
-        // Wysyłanie odpowiedzi do Pythona
-        // -----------------------------------------
 
-        if (client && client.connected())
+        // --------------------------------------------------
+        // Wysyłanie odpowiedzi do Pythona
+        // --------------------------------------------------
+
+        if (
+            client &&
+            client.connected()
+        )
         {
             if (!responsePending)
             {
@@ -581,7 +957,8 @@ void tcpTask(void* parameter)
                     responsePending = true;
                     pendingOffset = 0;
                 }
-                // Następnie najnowsza pozycja.
+
+                // Potem najnowsza pozycja.
                 else if (
                     tcpPosition != nullptr &&
                     xQueueReceive(
@@ -596,26 +973,40 @@ void tcpTask(void* parameter)
                 }
             }
 
+
             if (responsePending)
             {
-                size_t total = strlen(pendingResponse.text);
+                size_t total =
+                    strlen(
+                        pendingResponse.text
+                    );
+
 
                 if (pendingOffset < total)
                 {
-                    size_t remaining = total - pendingOffset;
+                    size_t remaining =
+                        total - pendingOffset;
 
-                    // Na Core 0; krótki timeout.
-                    size_t written = client.write(
-                        reinterpret_cast<const uint8_t*>(
-                            pendingResponse.text + pendingOffset
-                        ),
-                        remaining
-                    );
+
+                    size_t written =
+                        client.write(
+                            reinterpret_cast<
+                                const uint8_t*
+                            >(
+                                pendingResponse.text
+                                + pendingOffset
+                            ),
+                            remaining
+                        );
+
 
                     pendingOffset += written;
                 }
 
-                if (pendingOffset >= total)
+
+                if (
+                    pendingOffset >= total
+                )
                 {
                     responsePending = false;
                     pendingOffset = 0;
@@ -623,7 +1014,10 @@ void tcpTask(void* parameter)
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(2));
+
+        vTaskDelay(
+            pdMS_TO_TICKS(2)
+        );
     }
 }
 
@@ -677,6 +1071,14 @@ void setup() {
 
     delay(100);
 
+    if (!LittleFS.begin(true))
+    {
+        Serial.println("LittleFS ERROR");
+    }
+    else
+    {
+        Serial.println("LittleFS ready");
+    }
 
 
     // Podstawowa konfiguracja TMC2209.
@@ -827,6 +1229,7 @@ void loop()
 
     if (
         homeState == 4 &&
+        !motionManager.isPauseActive() &&
         !motion_executor1.isActive() &&
         !motion_executor2.isActive()
     )

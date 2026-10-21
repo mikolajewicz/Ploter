@@ -33,7 +33,9 @@ public:
         trajectory.clear();
     }
 
-    
+    void startPause(uint32_t durationMs);
+    void updatePause();
+    bool isPauseActive() const;
 
 private:
     std::vector<int> trajectory;
@@ -53,4 +55,8 @@ private:
 
     bool direction = true;
     bool active = false;
+
+    bool PauseActive = false;
+    uint32_t PauseStart = 0;
+    uint32_t pauseDuration = 0;
 };

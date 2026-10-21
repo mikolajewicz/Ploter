@@ -99,6 +99,9 @@ private:
     double line_vect_x = 0;
     double line_vect_y = 0;
 
+    bool pauseActive = false;
+    uint32_t pauseStart = 0;
+    uint32_t pauseDuration = 0;
 
 public:
     MotionManager(
@@ -200,5 +203,9 @@ public:
 
     void penUp(){ pen.up(); }
     void penDown(){ pen.down(); }
+
+    void startPause(uint32_t durationMs);
+    void updatePause();
+    bool isPauseActive() const;
 };
 

@@ -67,10 +67,43 @@ void GCodeInterpreter::processCommand(
     // --------------------------------------------------
 
     if (parser_.HasWord('G'))
-    {
+    {   
+
         int g = static_cast<int>(
             parser_.GetWordValue('G')
         );
+
+        if (g == 4)
+        {
+            if (!parser_.HasWord('P'))
+            {
+                sendResponse(
+                    "ERR G4 missing P"
+                );
+                return;
+            }
+
+            double pauseMs =
+                parser_.GetWordValue('P');
+
+            if (pauseMs < 0.0)
+            {
+                sendResponse(
+                    "ERR G4 invalid P"
+                );
+                return;
+            }
+
+            motionManager.startPause(
+                static_cast<uint32_t>(pauseMs)
+            );
+
+            sendResponse(
+                "OK G4 pause started"
+            );
+
+            return;
+        }
 
         // G90 - współrzędne absolutne
         if (g == 90)

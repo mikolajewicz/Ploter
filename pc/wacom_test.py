@@ -15,7 +15,9 @@ import socket
 
 from pyglet.window import mouse
 
-
+from pyglet.text.document import UnformattedDocument
+from pyglet.text.layout import IncrementalTextLayout
+from pyglet.text.caret import Caret
 
 
 
@@ -61,31 +63,44 @@ page_height = WINDOW_HEIGHT
 
 page_scale = 1.0
 
+# --------------------------------------------------
+# Panel G-code
+# --------------------------------------------------
+
+GCODE_PANEL_WIDTH = 420
+GCODE_PANEL_MARGIN = 15
+
+GCODE_TOGGLE_WIDTH = 30
+GCODE_TOGGLE_HEIGHT = 30
+
+gcode_panel_open = True
+
 def update_page_layout(width, height):
     global page_x, page_y
     global page_width, page_height
     global page_scale
     global left, right, bottom, top
 
-    window_ratio = width / height
+    if gcode_panel_open:
+        drawing_width = width - GCODE_PANEL_WIDTH
+    else:
+        drawing_width = width
+
+    window_ratio = drawing_width / height
 
     if window_ratio > A4_RATIO:
-        # okno jest za szerokie
         page_height = height
         page_width = page_height * A4_RATIO
     else:
-        # okno jest za wysokie
-        page_width = width
+        page_width = drawing_width
         page_height = page_width / A4_RATIO
 
-    # wyśrodkowanie kartki
-    page_x = (width - page_width) / 2.0
+    # Wyśrodkowanie kartki tylko w obszarze rysowania
+    page_x = (drawing_width - page_width) / 2.0
     page_y = (height - page_height) / 2.0
 
-    # ile pikseli odpowiada 1 mm
     page_scale = page_width / A4_WIDTH_MM
 
-    # margines 10 mm
     left = page_x + MARGIN_MM * page_scale
     right = page_x + page_width - MARGIN_MM * page_scale
 
@@ -158,6 +173,36 @@ class PlotterConnection:
                 count = self.socket.send(payload)
                 if count != len(payload):
                     raise OSError("TCP: nie wysłano całej komendy")
+
+    def send_bytes(self, payload):
+        with self.lock:
+
+            if self.serial_port is not None:
+                self.serial_port.write(payload)
+                self.serial_port.flush()
+                return
+
+            offset = 0
+
+            while offset < len(payload):
+
+                try:
+                    sent = self.socket.send(
+                        payload[offset:]
+                    )
+
+                except BlockingIOError:
+                    time.sleep(0.001)
+                    continue
+
+                if sent <= 0:
+                    raise ConnectionError(
+                        "TCP: połączenie zerwane podczas wysyłania"
+                    )
+
+                offset += sent
+
+    
 
     def receive(self):
         if self.serial_port is not None:
@@ -245,7 +290,44 @@ def send_command(command):
 
 
 
+def upload_gcode(gcode):
 
+    try:
+        # G-code trzymamy jako ASCII.
+        payload = (
+            gcode.rstrip()
+            + "\n"
+        ).encode("ascii")
+
+        header = (
+            f"GCODE_UPLOAD {len(payload)}\n"
+        ).encode("ascii")
+
+        print(
+            f"Wysyłanie G-code: "
+            f"{len(payload)} bajtów"
+        )
+
+        connection.send_bytes(
+            header + payload
+        )
+
+        print("G-code wysłany do ESP")
+
+    except UnicodeEncodeError:
+        print(
+            "G-code zawiera znaki spoza ASCII"
+        )
+
+    except (
+        serial.SerialException,
+        OSError,
+        ConnectionError
+    ) as e:
+        print(
+            "Błąd wysyłania G-code:",
+            e
+        )
 
 def console_input():
 
@@ -417,7 +499,108 @@ drawing_batch = pyglet.graphics.Batch()
 
 ui_batch = pyglet.graphics.Batch()
 
+# --------------------------------------------------
+# Edytor G-code
+# --------------------------------------------------
 
+gcode_batch = pyglet.graphics.Batch()
+
+gcode_document = UnformattedDocument(
+    """M5
+G0 X0 Y0
+"""
+)
+
+gcode_document.set_style(
+    0,
+    len(gcode_document.text),
+    {
+        "font_name": "Consolas",
+        "font_size": 11,
+        "color": (20, 20, 20, 255),
+    }
+)
+
+gcode_layout = IncrementalTextLayout(
+    gcode_document,
+    x=0,
+    y=0,
+    width=100,
+    height=100,
+    multiline=True,
+    wrap_lines=False,
+    batch=gcode_batch
+)
+
+gcode_caret = Caret(
+    gcode_layout,
+    window=window
+)
+
+gcode_caret.visible = False
+
+gcode_editor_focused = False
+
+
+gcode_panel = shapes.Rectangle(
+    0,
+    0,
+    GCODE_PANEL_WIDTH,
+    WINDOW_HEIGHT,
+    color=(235, 235, 235)
+)
+
+gcode_editor_bg = shapes.Rectangle(
+    0,
+    0,
+    100,
+    100,
+    color=(255, 255, 255)
+)
+
+
+gcode_title = pyglet.text.Label(
+    "G-CODE",
+    font_size=14,
+    weight="bold",
+    color=(0, 0, 0, 255)
+)
+
+
+SEND_GCODE_WIDTH = 170
+SEND_GCODE_HEIGHT = 35
+
+send_gcode_button = shapes.Rectangle(
+    0,
+    0,
+    SEND_GCODE_WIDTH,
+    SEND_GCODE_HEIGHT,
+    color=(70, 160, 80)
+)
+
+send_gcode_label = pyglet.text.Label(
+    "WYŚLIJ G-CODE",
+    anchor_x="center",
+    anchor_y="center",
+    color=(255, 255, 255, 255)
+)
+
+
+gcode_toggle_button = shapes.Rectangle(
+    0,
+    0,
+    GCODE_TOGGLE_WIDTH,
+    GCODE_TOGGLE_HEIGHT,
+    color=(190, 190, 190)
+)
+
+gcode_toggle_label = pyglet.text.Label(
+    ">",
+    anchor_x="center",
+    anchor_y="center",
+    font_size=16,
+    color=(0, 0, 0, 255)
+)
 
 lines = []
 
@@ -764,43 +947,106 @@ def clear_drawing():
     for segment in lines:
         segment["shape"].delete()
 
-
-
-        lines.clear()
-
-
-
-        last_x = None
-
-        last_y = None
-
-
-
-        print("Wyczyszczono kartkę")
-
-
-
-
-
+    lines.clear()
+    last_x = None
+    last_y = None
+    print("Wyczyszczono kartkę")
 
 
 @window.event
-
-
-
-@window.event
-
 def on_mouse_press(x, y, button, modifiers):
 
-
+    global gcode_panel_open
+    global gcode_editor_focused
 
     if button != mouse.LEFT:
+        return
+
+
+    # --------------------------------------------------
+    # Otwieranie / zamykanie panelu G-code
+    # --------------------------------------------------
+
+    if is_inside_rectangle(
+        x,
+        y,
+        gcode_toggle_button
+    ):
+        gcode_panel_open = not gcode_panel_open
+
+        gcode_editor_focused = False
+        gcode_caret.visible = False
+
+        if gcode_panel_open:
+            gcode_toggle_label.text = ">"
+        else:
+            gcode_toggle_label.text = "<"
+
+        on_resize(
+            window.width,
+            window.height
+        )
 
         return
 
 
+    # --------------------------------------------------
+    # Edytor G-code
+    # --------------------------------------------------
 
+    if (
+        gcode_panel_open
+        and is_inside_rectangle(
+            x,
+            y,
+            gcode_editor_bg
+        )
+    ):
+        gcode_editor_focused = True
+        gcode_caret.visible = True
+
+        gcode_caret.on_mouse_press(
+            x,
+            y,
+            button,
+            modifiers
+        )
+
+        return
+
+    gcode_editor_focused = False
+    gcode_caret.visible = False
+
+
+    # --------------------------------------------------
+    # WYŚLIJ G-CODE
+    # --------------------------------------------------
+
+    if (
+        gcode_panel_open
+        and is_inside_rectangle(
+            x,
+            y,
+            send_gcode_button
+        )
+    ):
+        gcode = gcode_document.text.strip()
+
+        if not gcode:
+            print("G-code jest pusty")
+            return
+
+        threading.Thread(
+            target=upload_gcode,
+            args=(gcode,),
+            daemon=True
+        ).start()
+        return
+
+
+    # --------------------------------------------------
     # HOME
+    # --------------------------------------------------
 
     if is_inside_rectangle(x, y, home_button):
 
@@ -813,8 +1059,9 @@ def on_mouse_press(x, y, button, modifiers):
         return
 
 
-
+    # --------------------------------------------------
     # WYCZYŚĆ
+    # --------------------------------------------------
 
     if is_inside_rectangle(x, y, clear_button):
 
@@ -823,18 +1070,14 @@ def on_mouse_press(x, y, button, modifiers):
         return
 
 
-
+    # --------------------------------------------------
     # Obszar rysowania
+    # --------------------------------------------------
 
     inside_drawing_area = (
-
         left <= x <= right
-
         and bottom <= y <= top
-
     )
-
-
 
     if inside_drawing_area:
 
@@ -842,8 +1085,82 @@ def on_mouse_press(x, y, button, modifiers):
 
         return
 
+@window.event
+def on_text(text):
+
+    if (
+        gcode_panel_open
+        and gcode_editor_focused
+    ):
+        return gcode_caret.on_text(text)
 
 
+@window.event
+def on_text_motion(motion):
+
+    if (
+        gcode_panel_open
+        and gcode_editor_focused
+    ):
+        return gcode_caret.on_text_motion(motion)
+
+
+@window.event
+def on_text_motion_select(motion):
+
+    if (
+        gcode_panel_open
+        and gcode_editor_focused
+    ):
+        return gcode_caret.on_text_motion_select(motion)
+
+
+@window.event
+def on_mouse_drag(
+    x,
+    y,
+    dx,
+    dy,
+    buttons,
+    modifiers
+):
+
+    if (
+        gcode_panel_open
+        and gcode_editor_focused
+    ):
+        return gcode_caret.on_mouse_drag(
+            x,
+            y,
+            dx,
+            dy,
+            buttons,
+            modifiers
+        )
+
+
+@window.event
+def on_mouse_scroll(
+    x,
+    y,
+    scroll_x,
+    scroll_y
+):
+
+    if (
+        gcode_panel_open
+        and is_inside_rectangle(
+            x,
+            y,
+            gcode_editor_bg
+        )
+    ):
+        return gcode_caret.on_mouse_scroll(
+            x,
+            y,
+            scroll_x,
+            scroll_y
+        )
 
 
 # --------------------------------------------------
@@ -1379,6 +1696,7 @@ def is_inside_rectangle(x, y, rect):
     )
 
 
+
 @window.event
 def on_resize(width, height):
 
@@ -1386,7 +1704,11 @@ def on_resize(width, height):
 
     update_margin_lines()
 
-    # przycisk WYCZYŚĆ
+
+    # --------------------------------------------------
+    # WYCZYŚĆ
+    # --------------------------------------------------
+
     clear_button.y = height - 30
 
     clear_label.x = (
@@ -1399,12 +1721,24 @@ def on_resize(width, height):
         + clear_button.height / 2
     )
 
+
+    # --------------------------------------------------
     # HOME
-    home_button.x = (
-        width
-        - HOME_BUTTON_WIDTH
-        - HOME_BUTTON_MARGIN
-    )
+    # --------------------------------------------------
+
+
+    if gcode_panel_open:
+        drawing_width = width - GCODE_PANEL_WIDTH
+        home_button.x = drawing_width - HOME_BUTTON_WIDTH - HOME_BUTTON_MARGIN
+    else:
+        drawing_width = width
+        home_button.x = (
+            width
+            - GCODE_TOGGLE_WIDTH
+            - HOME_BUTTON_WIDTH
+            - HOME_BUTTON_MARGIN
+            - 20
+        )
 
     home_button.y = (
         height
@@ -1422,22 +1756,166 @@ def on_resize(width, height):
         + home_button.height / 2
     )
 
-    update_drawing_lines()  
+    # --------------------------------------------------
+    # Panel G-code
+    # --------------------------------------------------
+
+    if gcode_panel_open:
+
+        panel_x = width - GCODE_PANEL_WIDTH
+
+        gcode_panel.x = panel_x
+        gcode_panel.y = 0
+
+        gcode_panel.width = GCODE_PANEL_WIDTH
+        gcode_panel.height = height
+
+
+        editor_x = (
+            panel_x
+            + GCODE_PANEL_MARGIN
+        )
+
+        editor_y = 75
+
+        editor_width = (
+            GCODE_PANEL_WIDTH
+            - 2 * GCODE_PANEL_MARGIN
+        )
+
+        editor_height = height - 130
+
+
+        gcode_editor_bg.x = editor_x
+        gcode_editor_bg.y = editor_y
+        gcode_editor_bg.width = editor_width
+        gcode_editor_bg.height = editor_height
+
+
+        gcode_layout.x = editor_x + 8
+        gcode_layout.y = editor_y + 8
+
+        gcode_layout.width = int(
+            editor_width - 16
+        )
+
+        gcode_layout.height = int(
+            editor_height - 16
+        )
+
+
+        gcode_title.x = panel_x + 55
+        gcode_title.y = height - 30
+
+
+        gcode_toggle_button.x = (
+            panel_x + 10
+        )
+
+        gcode_toggle_button.y = (
+            height
+            - GCODE_TOGGLE_HEIGHT
+            - 10
+        )
+
+
+        send_gcode_button.x = (
+            panel_x
+            + GCODE_PANEL_WIDTH / 2
+            - SEND_GCODE_WIDTH / 2
+        )
+
+        send_gcode_button.y = 20
+
+
+    else:
+
+        gcode_toggle_button.x = (
+            width
+            - GCODE_TOGGLE_WIDTH
+            - 10
+        )
+
+        gcode_toggle_button.y = (
+            height
+            - GCODE_TOGGLE_HEIGHT
+            - 10
+        )
+
+
+    # --------------------------------------------------
+    # Napisy przycisków
+    # --------------------------------------------------
+
+    gcode_toggle_label.x = (
+        gcode_toggle_button.x
+        + gcode_toggle_button.width / 2
+    )
+
+    gcode_toggle_label.y = (
+        gcode_toggle_button.y
+        + gcode_toggle_button.height / 2
+    )
+
+
+    send_gcode_label.x = (
+        send_gcode_button.x
+        + send_gcode_button.width / 2
+    )
+
+    send_gcode_label.y = (
+        send_gcode_button.y
+        + send_gcode_button.height / 2
+    )
+
+
+    update_drawing_lines()
+
 
 
 @window.event
-
 def on_draw():
 
     window.clear()
 
 
+    # --------------------------------------------------
+    # Kartka
+    # --------------------------------------------------
 
     drawing_batch.draw()
 
     ui_batch.draw()
 
 
+    # --------------------------------------------------
+    # Panel G-code
+    # --------------------------------------------------
+
+    if gcode_panel_open:
+
+        gcode_panel.draw()
+
+        gcode_editor_bg.draw()
+
+        gcode_batch.draw()
+
+        gcode_title.draw()
+
+        send_gcode_button.draw()
+
+        send_gcode_label.draw()
+
+
+    # Przycisk otwierania panelu jest zawsze widoczny
+    gcode_toggle_button.draw()
+
+    gcode_toggle_label.draw()
+
+
+    # --------------------------------------------------
+    # Informacje
+    # --------------------------------------------------
 
     position_label.draw()
 
@@ -1446,43 +1924,33 @@ def on_draw():
     clear_label.draw()
 
 
+    # --------------------------------------------------
+    # Pozycja plotera
+    # --------------------------------------------------
 
     with tip_position_lock:
 
         position = tip_position
 
 
-
     if position is not None:
 
         x_mm, y_mm = position
 
-
-
         screen_x, screen_y = plotter_to_screen(
-
             x_mm,
-
             y_mm
-
         )
 
-
-
         tip_marker.x = screen_x
-
         tip_marker.y = screen_y
-
-
 
         tip_marker.draw()
 
 
-
     home_button.draw()
 
-    home_label.draw()    
-
+    home_label.draw()
 
 
 
@@ -1539,6 +2007,11 @@ pyglet.clock.schedule_interval(
 
     0.01
 
+)
+
+on_resize(
+    window.width,
+    window.height
 )
 
 pyglet.app.run()

@@ -506,6 +506,11 @@ void MotionManager::updatePause()
     }
 }
 
+bool MotionManager::isPauseActive() const
+{
+    return pauseActive;
+}
+
 void MotionManager::setLiveTarget(
     double x,
     double y,
