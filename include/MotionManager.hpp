@@ -15,7 +15,7 @@
 #include "PenController.hpp"
 
 #include <vector>
-
+#include <atomic>
 
 
 class MotionManager
@@ -91,8 +91,8 @@ private:
 
     uint32_t liveTargetLastUpdate = 0;
 
-    double current_x;
-    double current_y;
+    double current_x = 0.0;
+    double current_y = 0.0;
 
     double current_speed = 0;
 
@@ -102,6 +102,8 @@ private:
     bool pauseActive = false;
     uint32_t pauseStart = 0;
     uint32_t pauseDuration = 0;
+
+    std::atomic<uint32_t> pendingPlans_{0};
 
 public:
     MotionManager(
@@ -166,12 +168,12 @@ public:
     );
 
     bool planLine(
-    double pointA_x,
-    double pointA_y,
-    double pointB_x,
-    double pointB_y,
-    double speed,
-    double timeStep
+        double pointA_x,
+        double pointA_y,
+        double pointB_x,
+        double pointB_y,
+        double speed,
+        double timeStep
     );
 
     bool planArc(
@@ -207,5 +209,11 @@ public:
     void startPause(uint32_t durationMs);
     void updatePause();
     bool isPauseActive() const;
+
+    bool isPlanning() const;
+    bool canPlanNext();
+    bool isBusy();
+
+    
 };
 

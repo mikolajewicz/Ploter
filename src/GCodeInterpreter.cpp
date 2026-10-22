@@ -192,26 +192,14 @@ void GCodeInterpreter::processCommand(
     }
 
     // --------------------------------------------------
-    // Aktualna pozycja plotera
+    // Logiczna pozycja programu G-code
     // --------------------------------------------------
 
-    if (!motionManager.calculateCurrentPosition())
-    {
-        sendResponse(
-            "GCODE: cannot calculate current position"
-        );
+    double startX = currentX_;
+    double startY = currentY_;
 
-        return;
-    }
-
-    double currentX =
-        motionManager.getCurrentX();
-
-    double currentY =
-        motionManager.getCurrentY();
-
-    double targetX = currentX;
-    double targetY = currentY;
+    double targetX = currentX_;
+    double targetY = currentY_;
 
     // --------------------------------------------------
     // X
@@ -225,7 +213,7 @@ void GCodeInterpreter::processCommand(
         targetX =
             absoluteMode_
             ? x
-            : currentX + x;
+            : startX + x;
     }
 
     // --------------------------------------------------
@@ -240,7 +228,7 @@ void GCodeInterpreter::processCommand(
         targetY =
             absoluteMode_
             ? y
-            : currentY + y;
+            : startY + y;
     }
 
     // --------------------------------------------------
@@ -288,8 +276,8 @@ void GCodeInterpreter::processCommand(
 
         bool ok =
             motionManager.planLine(
-                currentX,
-                currentY,
+                startX,
+                startY,
                 targetX,
                 targetY,
                 speed,
@@ -310,8 +298,8 @@ void GCodeInterpreter::processCommand(
             sizeof(response),
             "GCODE LINE: G%d %.3f %.3f -> %.3f %.3f speed=%.3f",
             motionCode,
-            currentX,
-            currentY,
+            startX,
+            startY,
             targetX,
             targetY,
             speed
@@ -319,8 +307,8 @@ void GCodeInterpreter::processCommand(
 
         sendResponse(response);
 
-        x_ = targetX;
-        y_ = targetY;
+        currentX_ = targetX;
+        currentY_ = targetY;
 
         return;
     }
@@ -358,18 +346,18 @@ void GCodeInterpreter::processCommand(
             parser_.GetWordValue('J');
 
         double centerX =
-            currentX + i;
+            startX + i;
 
         double centerY =
-            currentY + j;
+            startY + j;
 
         bool clockwise =
             motionCode == 2;
 
         bool ok =
             motionManager.planArc(
-                currentX,
-                currentY,
+                startX,
+                startY,
                 targetX,
                 targetY,
                 centerX,
@@ -393,8 +381,8 @@ void GCodeInterpreter::processCommand(
             sizeof(response),
             "GCODE ARC: G%d %.3f %.3f -> %.3f %.3f center=%.3f %.3f speed=%.3f",
             motionCode,
-            currentX,
-            currentY,
+            startX,
+            startY,
             targetX,
             targetY,
             centerX,
@@ -404,9 +392,18 @@ void GCodeInterpreter::processCommand(
 
         sendResponse(response);
 
-        x_ = targetX;
-        y_ = targetY;
+        currentX_ = targetX;
+        currentY_ = targetY;
 
         return;
     }
+}
+
+void GCodeInterpreter::setPosition(
+    double x,
+    double y
+)
+{
+    currentX_ = x;
+    currentY_ = y;
 }

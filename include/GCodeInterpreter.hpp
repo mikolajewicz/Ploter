@@ -14,14 +14,18 @@ public:
         MotionManager& motionManager
     );
 
+    void setPosition(
+        double x,
+        double y
+    );
 private:
     GCodeParser parser_;
-
-    double x_ = 0.0;
-    double y_ = 0.0;
 
     // G-code: mm/min
     double feedrate_ = 1200.0;
 
     bool absoluteMode_ = true;
+
+    double currentX_ = 0.0;
+    double currentY_ = 0.0;
 };

@@ -14,11 +14,12 @@
 #include <ArduinoOTA.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include <LittleFS.h>
+#include "GCodeStorage.hpp"
+#include "GCodeProgram.hpp"
 
-constexpr bool BYPASS_HOME = false;
+constexpr bool BYPASS_HOME = true;
 
-// void testGCode();
+void testReadGCode();
 
 // --------------------------------------------------
 // Konfiguracja WIFI
@@ -280,6 +281,8 @@ bool requestHomeSequence()
     return true;
 }
 
+GCodeStorage gcodeStorage;
+
 MotionManager motionManager(
     motor1,
     tmc1,
@@ -295,6 +298,11 @@ MotionManager motionManager(
 
     Solver,
     pen
+);
+
+GCodeProgram gcodeProgram(
+    gcodeStorage,
+    motionManager
 );
 
 SerialCommandHandler serialCommandHandler(
@@ -368,12 +376,7 @@ void sendResponse(const char* message)
 
 void tcpTask(void* parameter)
 {
-    File gcodeUploadFile;
-
-    bool gcodeUploadActive = false;
-
-    size_t gcodeUploadRemaining = 0;
-    size_t gcodeUploadTotal = 0;
+    
 
     bool serverStarted = false;
 
@@ -394,23 +397,7 @@ void tcpTask(void* parameter)
 
     auto resetConnection = [&]()
     {
-        // Jeżeli trwał upload, zamknij plik.
-        if (gcodeUploadFile)
-        {
-            gcodeUploadFile.close();
-        }
-
-        // Niedokończony upload jest nieważny.
-        if (gcodeUploadActive)
-        {
-            LittleFS.remove(
-                "/job.tmp"
-            );
-        }
-
-        gcodeUploadActive = false;
-        gcodeUploadRemaining = 0;
-        gcodeUploadTotal = 0;
+        gcodeStorage.abortUpload();
 
         client.stop();
 
@@ -558,48 +545,18 @@ void tcpTask(void* parameter)
                 // TRYB UPLOADU G-CODE
                 // ==========================================
 
-                if (gcodeUploadActive)
+                if (gcodeStorage.isUploading())
                 {
-                    if (!gcodeUploadFile)
-                    {
-                        gcodeUploadActive = false;
-
-                        gcodeUploadRemaining = 0;
-                        gcodeUploadTotal = 0;
-
-                        LittleFS.remove(
-                            "/job.tmp"
-                        );
-
-                        sendResponse(
-                            "ERR GCODE FILE"
-                        );
-
-                        continue;
-                    }
-
-
-                    size_t written =
-                        gcodeUploadFile.write(
+                    bool ok =
+                        gcodeStorage.writeByte(
                             static_cast<uint8_t>(
                                 c
                             )
                         );
 
-
-                    // Nie udało się zapisać bajtu.
-                    if (written != 1)
+                    if (!ok)
                     {
-                        gcodeUploadFile.close();
-
-                        LittleFS.remove(
-                            "/job.tmp"
-                        );
-
-                        gcodeUploadActive = false;
-
-                        gcodeUploadRemaining = 0;
-                        gcodeUploadTotal = 0;
+                        gcodeStorage.abortUpload();
 
                         sendResponse(
                             "ERR GCODE WRITE"
@@ -608,78 +565,31 @@ void tcpTask(void* parameter)
                         continue;
                     }
 
-
-                    // Jeden bajt mniej do odebrania.
-                    gcodeUploadRemaining--;
-
-
-                    // --------------------------------------
-                    // Cały plik odebrany
-                    // --------------------------------------
-
                     if (
-                        gcodeUploadRemaining == 0
+                        gcodeStorage.getUploadRemaining()
+                        == 0
                     )
                     {
-                        gcodeUploadFile.close();
-
-                        gcodeUploadActive = false;
-
-
-                        // Stary poprawny program usuwamy
-                        // dopiero po odebraniu całego nowego.
-                        LittleFS.remove(
-                            "/job.gcode"
-                        );
-
-
-                        bool renamed =
-                            LittleFS.rename(
-                                "/job.tmp",
-                                "/job.gcode"
-                            );
-
-
-                        if (renamed)
+                        if (
+                            gcodeStorage.finishUpload()
+                        )
                         {
-                            char response[80];
-
-                            snprintf(
-                                response,
-                                sizeof(response),
-                                "GCODE STORED %u",
-                                static_cast<unsigned>(
-                                    gcodeUploadTotal
-                                )
-                            );
-
                             sendResponse(
-                                response
+                                "GCODE STORED"
                             );
+
+                        
                         }
                         else
                         {
-                            LittleFS.remove(
-                                "/job.tmp"
-                            );
-
                             sendResponse(
-                                "ERR GCODE RENAME"
+                                "ERR GCODE STORE"
                             );
                         }
-
-
-                        gcodeUploadRemaining = 0;
-                        gcodeUploadTotal = 0;
                     }
 
-
-                    // Bardzo ważne:
-                    // bajt należał do pliku,
-                    // więc nie trafia do parsera komend.
                     continue;
                 }
-
 
                 // ==========================================
                 // NORMALNY TRYB KOMEND TCP
@@ -726,9 +636,7 @@ void tcpTask(void* parameter)
                             ) == 0
                         )
                         {
-                            char* endPointer =
-                                nullptr;
-
+                            char* endPointer = nullptr;
 
                             unsigned long size =
                                 strtoul(
@@ -737,11 +645,8 @@ void tcpTask(void* parameter)
                                     10
                                 );
 
-
-                            // Sprawdzenie poprawności liczby.
                             if (
-                                endPointer
-                                    == command.text + 13
+                                endPointer == command.text + 13
                                 ||
                                 *endPointer != '\0'
                                 ||
@@ -754,28 +659,14 @@ void tcpTask(void* parameter)
                             }
                             else
                             {
-                                // Na wszelki wypadek.
-                                if (gcodeUploadFile)
-                                {
-                                    gcodeUploadFile.close();
-                                }
-
-
-                                // Usuwamy stary niedokończony
-                                // upload.
-                                LittleFS.remove(
-                                    "/job.tmp"
-                                );
-
-
-                                gcodeUploadFile =
-                                    LittleFS.open(
-                                        "/job.tmp",
-                                        "w"
+                                bool started =
+                                    gcodeStorage.beginUpload(
+                                        static_cast<size_t>(
+                                            size
+                                        )
                                     );
 
-
-                                if (!gcodeUploadFile)
+                                if (!started)
                                 {
                                     sendResponse(
                                         "ERR GCODE OPEN"
@@ -783,18 +674,6 @@ void tcpTask(void* parameter)
                                 }
                                 else
                                 {
-                                    gcodeUploadTotal =
-                                        static_cast<size_t>(
-                                            size
-                                        );
-
-                                    gcodeUploadRemaining =
-                                        gcodeUploadTotal;
-
-                                    gcodeUploadActive =
-                                        true;
-
-
                                     char response[80];
 
                                     snprintf(
@@ -802,7 +681,7 @@ void tcpTask(void* parameter)
                                         sizeof(response),
                                         "GCODE READY %u",
                                         static_cast<unsigned>(
-                                            gcodeUploadTotal
+                                            size
                                         )
                                     );
 
@@ -812,7 +691,6 @@ void tcpTask(void* parameter)
                                 }
                             }
                         }
-
 
                         // ==================================
                         // TABLET
@@ -1025,18 +903,74 @@ void processTcpCommands()
 {
     TcpCommand command;
 
-    // Najpierw komenda sterująca, np. HOME lub STOP.
-    if (tcpCommands != nullptr &&
-        xQueueReceive(tcpCommands, &command, 0) == pdTRUE)
+    if (
+        tcpCommands != nullptr &&
+        xQueueReceive(
+            tcpCommands,
+            &command,
+            0
+        ) == pdTRUE
+    )
     {
-        serialCommandHandler.processCommand(command.text);
+        if (
+            strcmp(
+                command.text,
+                "GCODE_RUN"
+            ) == 0
+        )
+        {
+            if (homeState != 4)
+            {
+                sendResponse(
+                    "ERR GCODE HOME"
+                );
+            }
+            else if (
+                !gcodeProgram.start()
+            )
+            {
+                sendResponse(
+                    "ERR GCODE RUN"
+                );
+            }
+        }
+        else if (
+            strcmp(
+                command.text,
+                "stop"
+            ) == 0
+        )
+        {
+            gcodeProgram.stop();
+
+            serialCommandHandler.processCommand(
+                command.text
+            );
+        }
+        else
+        {
+            serialCommandHandler.processCommand(
+                command.text
+            );
+        }
     }
 
     // Następnie tylko najnowsza pozycja tabletu.
-    if (tabletCommands != nullptr &&
-        xQueueReceive(tabletCommands, &command, 0) == pdTRUE)
+    if (
+        tabletCommands != nullptr &&
+        xQueueReceive(
+            tabletCommands,
+            &command,
+            0
+        ) == pdTRUE
+    )
     {
-        serialCommandHandler.processCommand(command.text);
+        if (!gcodeProgram.isRunning())
+        {
+            serialCommandHandler.processCommand(
+                command.text
+            );
+        }
     }
 }
 
@@ -1071,13 +1005,17 @@ void setup() {
 
     delay(100);
 
-    if (!LittleFS.begin(true))
+    if (!gcodeStorage.begin())
     {
-        Serial.println("LittleFS ERROR");
+        Serial.println(
+            "GCode storage ERROR"
+        );
     }
     else
     {
-        Serial.println("LittleFS ready");
+        Serial.println(
+            "GCode storage ready"
+        );
     }
 
 
@@ -1227,6 +1165,10 @@ void loop()
     motion_executor1.update();
     motion_executor2.update();
 
+    motionManager.updatePause();
+
+    gcodeProgram.update();
+
     if (
         homeState == 4 &&
         !motionManager.isPauseActive() &&
@@ -1234,11 +1176,15 @@ void loop()
         !motion_executor2.isActive()
     )
     {
-        if (motionManager.isTrajectoryReady())
+        if (
+            motionManager.isTrajectoryReady()
+        )
         {
             motionManager.startPreparedMotion();
         }
-        else
+        else if (
+            !gcodeProgram.isRunning()
+        )
         {
             motionManager.followTarget();
         }
@@ -1466,50 +1412,51 @@ int64_t angleToSteps(double angle)
     );
 }
 
-void testMotor1Direction()
+void testReadGCode()
 {
-    Serial.println("=== M1 TEST ===");
-
-    motor1.enable();
-
-    Serial.print("Start stepCount: ");
-    Serial.println(motor1.getStepCount());
-
-    // DIR = false
-    motor1.setDirection(false);
-
-    Serial.println("M1 DIR=false - 200 steps");
-
-    for (int i = 0; i < 200; i++)
+    if (!gcodeStorage.openProgram())
     {
-        motor1.step();
-        delayMicroseconds(1000);
+        sendResponse(
+            "GCODE READ ERROR"
+        );
+
+        return;
     }
 
-    Serial.print("stepCount: ");
-    Serial.println(motor1.getStepCount());
+    sendResponse(
+        "GCODE FILE BEGIN"
+    );
 
-    delay(2000);
+    String line;
+    int lineNumber = 1;
 
-    // DIR = true
-    motor1.setDirection(true);
-
-    Serial.println("M1 DIR=true - 200 steps");
-
-    for (int i = 0; i < 200; i++)
+    while (
+        gcodeStorage.readLine(line)
+    )
     {
-        motor1.step();
-        delayMicroseconds(1000);
+        char response[160];
+
+        snprintf(
+            response,
+            sizeof(response),
+            "GCODE LINE %d: %s",
+            lineNumber,
+            line.c_str()
+        );
+
+        sendResponse(
+            response
+        );
+
+        lineNumber++;
     }
 
-    Serial.print("stepCount: ");
-    Serial.println(motor1.getStepCount());
+    gcodeStorage.closeProgram();
 
-    Serial.println("=== END ===");
+    sendResponse(
+        "GCODE FILE END"
+    );
 }
-
-
-
 
 
 

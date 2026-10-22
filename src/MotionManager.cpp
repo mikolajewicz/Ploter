@@ -242,8 +242,12 @@ void MotionManager::plannerTask()
 
         if (!success)
         {
-            Serial.println("Motion planning failed");
+            Serial.println(
+                "Motion planning failed"
+            );
         }
+
+        pendingPlans_.fetch_sub(1);
     }
 }
 
@@ -273,11 +277,21 @@ bool MotionManager::planA2B(
     request.value = time;
     request.timeStep = timeStep;
 
-    return xQueueSend(
-        motionQueue,
-        &request,
-        0
-    ) == pdTRUE;
+    pendingPlans_.fetch_add(1);
+
+    if (
+        xQueueSend(
+            motionQueue,
+            &request,
+            0
+        ) != pdTRUE
+    )
+    {
+        pendingPlans_.fetch_sub(1);
+        return false;
+    }
+
+    return true;
 }
 
 bool MotionManager::line(
@@ -438,11 +452,21 @@ bool MotionManager::planLine(
     request.value = speed;
     request.timeStep = timeStep;
 
-    return xQueueSend(
-        motionQueue,
-        &request,
-        0
-    ) == pdTRUE;
+    pendingPlans_.fetch_add(1);
+
+    if (
+        xQueueSend(
+            motionQueue,
+            &request,
+            0
+        ) != pdTRUE
+    )
+    {
+        pendingPlans_.fetch_sub(1);
+        return false;
+    }
+
+    return true;
 
 }
 
@@ -481,11 +505,21 @@ bool MotionManager::planArc(
     request.value = speed;
     request.timeStep = timeStep;
 
-    return xQueueSend(
-        motionQueue,
-        &request,
-        0
-    ) == pdTRUE;
+    pendingPlans_.fetch_add(1);
+
+    if (
+        xQueueSend(
+            motionQueue,
+            &request,
+            0
+        ) != pdTRUE
+    )
+    {
+        pendingPlans_.fetch_sub(1);
+        return false;
+    }
+
+    return true;
 }
 
 void MotionManager::startPause(uint32_t durationMs)
@@ -780,10 +814,27 @@ void MotionManager::clearLiveTarget()
     pen.up();
 }
 
+bool MotionManager::canPlanNext()
+{
+    return
+        !isPlanning() &&
+        !isTrajectoryReady();
+}
 
+bool MotionManager::isBusy()
+{
+    return
+        isPlanning() ||
+        isTrajectoryReady() ||
+        motionExecutor1.isActive() ||
+        motionExecutor2.isActive() ||
+        isPauseActive();
+}
 
-
-
+bool MotionManager::isPlanning() const
+{
+    return pendingPlans_.load() > 0;
+}
 
 
 
