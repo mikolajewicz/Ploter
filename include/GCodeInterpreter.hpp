@@ -18,6 +18,11 @@ public:
         double x,
         double y
     );
+
+    bool isInsideWorkspace(
+        double x,
+        double y
+    );  
 private:
     GCodeParser parser_;
 

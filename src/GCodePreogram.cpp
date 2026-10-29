@@ -17,6 +17,7 @@ GCodeProgram::GCodeProgram(
 
 bool GCodeProgram::start()
 {
+
     if (running_)
     {
         return false;
@@ -27,13 +28,12 @@ bool GCodeProgram::start()
         return false;
     }
 
-    // Fizyczna pozycja jest potrzebna tylko RAZ:
-    // na początku programu.
     if (
         !motionManager_.calculateCurrentPosition()
     )
     {
         storage_.closeProgram();
+
         return false;
     }
 
@@ -42,7 +42,6 @@ bool GCodeProgram::start()
         motionManager_.getCurrentY()
     );
 
-    // Tablet nie może walczyć z G-code.
     motionManager_.clearLiveTarget();
 
     running_ = true;

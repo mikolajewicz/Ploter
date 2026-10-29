@@ -214,6 +214,6 @@ public:
     bool canPlanNext();
     bool isBusy();
 
-    
+    void clearPreparedMotion();
 };
 

@@ -1,6 +1,8 @@
 #include "MotionManager.hpp"
 
 extern bool isHomeSequenceActive();
+extern void sendResponse(const char* message);
+extern RTC_DATA_ATTR uint32_t lastCrashStage;
 
 MotionManager::MotionManager(
     MotorDriver& motor1,
@@ -119,6 +121,7 @@ bool MotionManager::startPreparedMotion()
 
     xSemaphoreGive(trajectoryMutex);
 
+
     motionExecutor1.start(
         std::move(trajectory1),
         timeStep
@@ -190,20 +193,30 @@ void MotionManager::plannerTask()
 
     while (true)
     {
-        if (xQueueReceive(
+        // Planner czeka na nowe zadanie
+        lastCrashStage = 100;
+
+        if (
+            xQueueReceive(
                 motionQueue,
                 &request,
                 portMAX_DELAY
-            ) != pdTRUE)
+            ) != pdTRUE
+        )
         {
             continue;
         }
+
+        lastCrashStage = 110;
 
         bool success = false;
 
         switch (request.type)
         {
             case MotionType::A2B:
+            {
+                lastCrashStage = 120;
+
                 success = A2B(
                     request.pointA_x,
                     request.pointA_y,
@@ -212,9 +225,15 @@ void MotionManager::plannerTask()
                     request.value,
                     request.timeStep
                 );
+
+                lastCrashStage = 121;
                 break;
+            }
 
             case MotionType::LINE:
+            {
+                lastCrashStage = 200;
+
                 success = line(
                     request.pointA_x,
                     request.pointA_y,
@@ -223,9 +242,15 @@ void MotionManager::plannerTask()
                     request.value,
                     request.timeStep
                 );
-                break;
 
-            case MotionType::ARC:   
+                lastCrashStage = 201;
+                break;
+            }
+
+            case MotionType::ARC:
+            {
+                lastCrashStage = 300;
+
                 success = generateArc(
                     request.pointA_x,
                     request.pointA_y,
@@ -237,17 +262,26 @@ void MotionManager::plannerTask()
                     request.value,
                     request.timeStep
                 );
-                break;      
+
+                lastCrashStage = 301;
+                break;
+            }
         }
+
+        lastCrashStage = 400;
 
         if (!success)
         {
-            Serial.println(
+            sendResponse(
                 "Motion planning failed"
             );
         }
 
+        lastCrashStage = 410;
+
         pendingPlans_.fetch_sub(1);
+
+        lastCrashStage = 420;
     }
 }
 
@@ -303,6 +337,8 @@ bool MotionManager::line(
     double timeStep
 )
 {
+    lastCrashStage = 101;
+
     if (!solver.line(
             Ax,
             Ay,
@@ -312,32 +348,49 @@ bool MotionManager::line(
             timeStep
         ))
     {
-        Serial.println("solver.line FAILED");
+        sendResponse("DBG solver.line FAILED");
         return false;
     }
 
+    lastCrashStage = 102;
+
     if (!solver.compute())
     {
-        Serial.println("solver.compute FAILED");
+        sendResponse("DBG solver.compute FAILED");
         return false;
     }
+
+    lastCrashStage = 103;
 
     trajectoryGenerator1.takeTrajectory(
         solver.takeMotor1Trajectory()
     );
 
+    lastCrashStage = 104;
+
     trajectoryGenerator2.takeTrajectory(
         solver.takeMotor2Trajectory()
     );
 
+    lastCrashStage = 105;
+
     trajectoryGenerator1.convertToSteps();
+
+    lastCrashStage = 106;
+
     trajectoryGenerator2.convertToSteps();
+
+    lastCrashStage = 107;
 
     std::vector<int> prepared1 =
         trajectoryGenerator1.takeStepTrajectory();
 
+    lastCrashStage = 108;
+
     std::vector<int> prepared2 =
         trajectoryGenerator2.takeStepTrajectory();
+
+    lastCrashStage = 109;
 
     xSemaphoreTake(
         trajectoryMutex,
@@ -351,8 +404,6 @@ bool MotionManager::line(
     trajectoryReady = true;
 
     xSemaphoreGive(trajectoryMutex);
-
-    // Serial.println("LINE READY");
 
     return true;
 }
@@ -381,13 +432,13 @@ bool MotionManager::generateArc(
             timeStep
         ))
     {
-        Serial.println("solver.generateArc FAILED");
+        sendResponse("solver.generateArc FAILED");
         return false;
     }
 
     if (!solver.compute())
     {
-        Serial.println("solver.compute FAILED");
+        sendResponse("solver.compute FAILED");
         return false;
     }
 
@@ -421,7 +472,7 @@ bool MotionManager::generateArc(
 
     xSemaphoreGive(trajectoryMutex);
 
-    // Serial.println("LINE READY");
+    // sendResponse("LINE READY");
 
     return true;
 }
@@ -836,7 +887,27 @@ bool MotionManager::isPlanning() const
     return pendingPlans_.load() > 0;
 }
 
+void MotionManager::clearPreparedMotion()
+{
+    if (trajectoryMutex == nullptr)
+    {
+        return;
+    }
 
+    xSemaphoreTake(
+        trajectoryMutex,
+        portMAX_DELAY
+    );
+
+    nextTrajectory1.clear();
+    nextTrajectory2.clear();
+
+    trajectoryReady = false;
+
+    xSemaphoreGive(
+        trajectoryMutex
+    );
+}
 
 
 

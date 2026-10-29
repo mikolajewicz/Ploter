@@ -1,7 +1,80 @@
 #include "GCodeInterpreter.hpp"
 #include "MotionManager.hpp"
+#include <cstdlib>
 
 extern void sendResponse(const char* message);
+
+namespace
+{
+    constexpr double G0_SPEED_MM_S = 60.0;
+
+    constexpr double GCODE_POINT_DISTANCE_MM = 0.2;
+
+    constexpr double GCODE_MIN_TIME_STEP = 0.002;
+    constexpr double GCODE_MAX_TIME_STEP = 0.05;
+
+    constexpr size_t GCODE_MAX_LINE_POINTS = 600;
+
+    double calculateGCodeTimeStep(
+        double speed
+    )
+    {
+        if (speed <= 0.0)
+        {
+            return GCODE_MIN_TIME_STEP;
+        }
+
+        double timeStep =
+            GCODE_POINT_DISTANCE_MM / speed;
+
+        if (timeStep < GCODE_MIN_TIME_STEP)
+        {
+            timeStep =
+                GCODE_MIN_TIME_STEP;
+        }
+
+        if (timeStep > GCODE_MAX_TIME_STEP)
+        {
+            timeStep =
+                GCODE_MAX_TIME_STEP;
+        }
+
+        return timeStep;
+    }
+
+    double calculateGCodeLineTimeStep(
+        double speed,
+        double distance
+    )
+    {
+        double timeStep =
+            calculateGCodeTimeStep(speed);
+
+        if (
+            speed <= 0.0 ||
+            distance <= 0.0
+        )
+        {
+            return timeStep;
+        }
+
+        double duration =
+            distance / speed;
+
+        double limitedTimeStep =
+            duration /
+            static_cast<double>(
+                GCODE_MAX_LINE_POINTS - 1
+            );
+
+        if (timeStep < limitedTimeStep)
+        {
+            timeStep = limitedTimeStep;
+        }
+
+        return timeStep;
+    }
+}
 
 void GCodeInterpreter::processCommand(
     const String& line,
@@ -29,29 +102,26 @@ void GCodeInterpreter::processCommand(
 
     if (parser_.HasWord('M'))
     {
+        int mPosition =
+            parser_.FindWord('M');
+
         int m = static_cast<int>(
-            parser_.GetWordValue('M')
+            strtol(
+                &parser_.line[mPosition + 1],
+                nullptr,
+                10
+            )
         );
 
         if (m == 3)
         {
             motionManager.penDown();
-
-            sendResponse(
-                "OK M3 pen down"
-            );
-
             return;
         }
 
         if (m == 5)
         {
             motionManager.penUp();
-
-            sendResponse(
-                "OK M5 pen up"
-            );
-
             return;
         }
 
@@ -67,11 +137,29 @@ void GCodeInterpreter::processCommand(
     // --------------------------------------------------
 
     if (parser_.HasWord('G'))
-    {   
+    {
+        int gPosition =
+            parser_.FindWord('G');
 
         int g = static_cast<int>(
-            parser_.GetWordValue('G')
+            strtol(
+                &parser_.line[gPosition + 1],
+                nullptr,
+                10
+            )
         );
+
+        char debug[80];
+
+        snprintf(
+            debug,
+            sizeof(debug),
+            "DBG G=%d LINE=%s",
+            g,
+            line.c_str()
+        );
+
+        // sendResponse(debug);
 
         if (g == 4)
         {
@@ -187,7 +275,19 @@ void GCodeInterpreter::processCommand(
     // Samo F jest dozwolone
     if (motionCode == -1)
     {
-        sendResponse("GCODE: OK");
+        if (parser_.HasWord('F'))
+        {
+            sendResponse(
+                "GCODE: OK"
+            );
+        }
+        else
+        {
+            sendResponse(
+                "GCODE: unknown command"
+            );
+        }
+
         return;
     }
 
@@ -238,8 +338,16 @@ void GCodeInterpreter::processCommand(
     // MotionManager = mm/s
     // --------------------------------------------------
 
-    double speed =
-        feedrate_ / 60.0;
+    double speed;
+
+    if (motionCode == 0)
+    {
+        speed = G0_SPEED_MM_S;
+    }
+    else
+    {
+        speed = feedrate_ / 60.0;
+    }
 
     if (speed <= 0.0)
     {
@@ -274,6 +382,29 @@ void GCodeInterpreter::processCommand(
             return;
         }
 
+        double distance =
+            std::hypot(
+                targetX - startX,
+                targetY - startY
+            );
+
+        double timeStep =
+            calculateGCodeLineTimeStep(
+                speed,
+                distance
+            );
+
+        if (!isInsideWorkspace(targetX, targetY))
+        {
+            motionManager.penUp();
+
+            sendResponse(
+                "ERR GCODE outside workspace"
+            );
+
+            return;
+        }
+
         bool ok =
             motionManager.planLine(
                 startX,
@@ -281,7 +412,7 @@ void GCodeInterpreter::processCommand(
                 targetX,
                 targetY,
                 speed,
-                0.002
+                timeStep
             );
 
         if (!ok)
@@ -364,7 +495,7 @@ void GCodeInterpreter::processCommand(
                 centerY,
                 clockwise,
                 speed,
-                0.002
+                calculateGCodeTimeStep(speed)
             );
 
         if (!ok)
@@ -406,4 +537,19 @@ void GCodeInterpreter::setPosition(
 {
     currentX_ = x;
     currentY_ = y;
+}
+
+bool GCodeInterpreter::isInsideWorkspace(
+    double x,
+    double y
+)
+{
+    constexpr double X_MAX = 138.5;
+    constexpr double Y_MAX = 95.0;
+
+    return
+        x >= -X_MAX &&
+        x <= X_MAX &&
+        y >= -Y_MAX &&
+        y <= Y_MAX;
 }

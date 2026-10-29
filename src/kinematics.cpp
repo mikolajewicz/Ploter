@@ -456,6 +456,14 @@ bool Kinematics::generateArc(
     x_vect.clear();
     y_vect.clear();
 
+    x_vect.reserve(
+        samples + 2
+    );
+
+    y_vect.reserve(
+        samples + 2
+    );
+
     for (size_t i = 0; i <= samples; ++i) {
         double t = i * timeStep;
         double progress = t / time;

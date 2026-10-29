@@ -132,6 +132,13 @@ void TrajectoryGenerator::convertToSteps() {
     
     stepTrajectory.clear();
     
+    if (trajectoryPoints.size() > 1)
+    {
+        stepTrajectory.reserve(
+            trajectoryPoints.size() - 1
+        );
+    }
+
     current_id = 0;
     double diffrence = 0;
     double residue = 0;

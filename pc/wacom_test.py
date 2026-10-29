@@ -74,6 +74,10 @@ GCODE_TOGGLE_WIDTH = 30
 GCODE_TOGGLE_HEIGHT = 30
 
 gcode_panel_open = True
+tablet_control_enabled = True
+motors_enabled = True
+
+PLOTTER_DRAW_MIN_DISTANCE_MM = 0.3
 
 def update_page_layout(width, height):
     global page_x, page_y
@@ -137,90 +141,391 @@ BAUD_RATE = 115200
 
 
 class PlotterConnection:
+    RECONNECT_INTERVAL = 1.0
+    CONNECT_TIMEOUT = 0.5
+
+    def _start_reconnect_thread(self):
+
+        if CONNECTION_MODE != "wifi":
+            return
+
+        if (
+            self.reconnect_thread is not None
+            and self.reconnect_thread.is_alive()
+        ):
+            return
+
+        self.reconnect_thread = threading.Thread(
+            target=self._reconnect_loop,
+            daemon=True
+        )
+
+        self.reconnect_thread.start()
+
+        print("TCP reconnect thread started")
+
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+
+        self.last_rx_time = time.monotonic()
+        self.last_ping_time = 0.0
+
         self.serial_port = None
         self.socket = None
+
+        self.last_ip = None
+        self.last_reconnect_log = 0.0
+        self.last_rx_time = time.monotonic()
+
+        self.stop_event = threading.Event()
+        self.reconnect_thread = None
+
         if CONNECTION_MODE == "usb":
+
             self.serial_port = serial.Serial(
-                SERIAL_PORT, BAUD_RATE, timeout=0.01
+                SERIAL_PORT,
+                BAUD_RATE,
+                timeout=0.01
             )
-            print("USB connected:", SERIAL_PORT)
+
+            print(
+                "USB connected:",
+                SERIAL_PORT
+            )
+
         elif CONNECTION_MODE == "wifi":
-            self.socket = socket.create_connection(
-                (ESP_HOST, ESP_PORT), timeout=5
-            )
 
-            self.socket.setsockopt(
-                socket.IPPROTO_TCP,
-                socket.TCP_NODELAY,
-                1
-            )
+            # Pierwsza próba połączenia.
+            if not self._connect_wifi():
+                print(
+                    "TCP: ESP niedostępne, "
+                    "czekam na połączenie..."
+                )
 
-            self.socket.setblocking(False)
-            print("TCP connected:", ESP_HOST, ESP_PORT)
+            # Automatyczne ponowne łączenie.
+
+            self._start_reconnect_thread()
+
         else:
-            raise ValueError("CONNECTION_MODE musi być 'usb' albo 'wifi'")
+            raise ValueError(
+                "CONNECTION_MODE musi być "
+                "'usb' albo 'wifi'"
+            )
+
+    # --------------------------------------------------
+    # WiFi
+    # --------------------------------------------------
+
+    def _connect_wifi(self):
+
+        if CONNECTION_MODE != "wifi":
+            return False
+
+        with self.lock:
+            if self.socket is not None:
+                return True
+
+        targets = []
+
+        # Najpierw próbujemy ostatniego znanego IP.
+        if self.last_ip is not None:
+            targets.append(self.last_ip)
+
+        # Potem hostname .local.
+        if ESP_HOST not in targets:
+            targets.append(ESP_HOST)
+
+        for host in targets:
+
+            try:
+                new_socket = socket.create_connection(
+                    (host, ESP_PORT),
+                    timeout=1.0
+                )
+
+                new_socket.setsockopt(
+                    socket.IPPROTO_TCP,
+                    socket.TCP_NODELAY,
+                    1
+                )
+
+                new_socket.setblocking(False)
+
+                # Zapamiętaj faktyczne IP ESP.
+                self.last_ip = (
+                    new_socket.getpeername()[0]
+                )
+
+            except OSError:
+                continue
+
+            with self.lock:
+
+                if self.socket is not None:
+                    new_socket.close()
+                    return True
+
+                self.socket = new_socket
+                self.last_rx_time = time.monotonic()
+                self.last_ping_time = 0.0
+
+            print(
+                "TCP connected:",
+                self.last_ip,
+                ESP_PORT
+            )
+
+            return True
+
+        return False
+
+    def _disconnect_wifi(
+        self,
+        broken_socket=None
+    ):
+
+        with self.lock:
+
+            if broken_socket is not None:
+                if self.socket is not broken_socket:
+                    return
+
+            sock = self.socket
+            self.socket = None
+
+        if sock is not None:
+            try:
+                sock.shutdown(
+                    socket.SHUT_RDWR
+                )
+            except OSError:
+                pass
+
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    def _reconnect_loop(self):
+
+        while not self.stop_event.is_set():
+
+            try:
+
+                with self.lock:
+                    connected = (
+                        self.socket is not None
+                    )
+
+                if not connected:
+
+                    if self._connect_wifi():
+
+                        print(
+                            "TCP: reconnect OK"
+                        )
+
+                    else:
+
+                        now = time.monotonic()
+
+                        if (
+                            now
+                            - self.last_reconnect_log
+                            >= 2.0
+                        ):
+                            self.last_reconnect_log = now
+
+                            print(
+                                "TCP: czekam na ESP32..."
+                            )
+
+                else:
+
+                    now = time.monotonic()
+
+                    # Heartbeat co 1 s
+                    if (
+                        now - self.last_ping_time
+                        >= 1.0
+                    ):
+                        self.last_ping_time = now
+
+                        try:
+                            self.send("PING\n")
+
+                        except OSError:
+                            self._disconnect_wifi()
+                            continue
+
+                    # Brak odpowiedzi przez 5 s
+                    if (
+                        now - self.last_rx_time
+                        >= 5.0
+                    ):
+                        print(
+                            "TCP: brak odpowiedzi ESP32"
+                        )
+
+                        self._disconnect_wifi()
+
+            except Exception as e:
+
+                print(
+                    "TCP reconnect error:",
+                    repr(e)
+                )
+
+                try:
+                    self._disconnect_wifi()
+                except Exception:
+                    pass
+
+            self.stop_event.wait(0.25)
+
+    def ensure_reconnect(self):
+
+        if CONNECTION_MODE != "wifi":
+            return
+
+        self._start_reconnect_thread()
+    # --------------------------------------------------
+    # SEND
+    # --------------------------------------------------
 
     def send(self, message):
+
         payload = message.encode("ascii")
-        with self.lock:
-            if self.serial_port is not None:
-                self.serial_port.write(payload)
-            else:
-                # socket jest nieblokujący; ramki są niewielkie.
-                # W przypadku przepełnienia bufora nie blokujemy Pyglet.
-                count = self.socket.send(payload)
-                if count != len(payload):
-                    raise OSError("TCP: nie wysłano całej komendy")
+
+        self.send_bytes(payload)
 
     def send_bytes(self, payload):
+
         with self.lock:
 
             if self.serial_port is not None:
+
                 self.serial_port.write(payload)
                 self.serial_port.flush()
                 return
 
+            sock = self.socket
+
+            if sock is None:
+                raise ConnectionError(
+                    "TCP: brak połączenia z ESP32"
+                )
+
             offset = 0
 
-            while offset < len(payload):
+            try:
 
-                try:
-                    sent = self.socket.send(
-                        payload[offset:]
-                    )
+                while offset < len(payload):
 
-                except BlockingIOError:
-                    time.sleep(0.001)
-                    continue
+                    try:
+                        sent = sock.send(
+                            payload[offset:]
+                        )
 
-                if sent <= 0:
-                    raise ConnectionError(
-                        "TCP: połączenie zerwane podczas wysyłania"
-                    )
+                    except BlockingIOError:
+                        time.sleep(0.001)
+                        continue
 
-                offset += sent
+                    if sent <= 0:
+                        raise ConnectionError(
+                            "TCP: połączenie zerwane "
+                            "podczas wysyłania"
+                        )
 
-    
+                    offset += sent
+
+            except OSError:
+
+                self._disconnect_wifi(sock)
+                raise
+
+    # --------------------------------------------------
+    # RECEIVE
+    # --------------------------------------------------
 
     def receive(self):
+
         if self.serial_port is not None:
+
             count = self.serial_port.in_waiting
-            return self.serial_port.read(count) if count else b""
-        try:
-            data = self.socket.recv(4096)
-            if not data:
-                raise ConnectionError("TCP: ESP32 rozłączyło połączenie")
-            return data
-        except BlockingIOError:
+
+            if count:
+                return self.serial_port.read(count)
+
             return b""
 
+        with self.lock:
+            sock = self.socket
+
+        if sock is None:
+            return b""
+
+        try:
+
+            data = sock.recv(4096)
+
+            if not data:
+
+                self._disconnect_wifi(sock)
+
+                raise ConnectionError(
+                    "TCP: ESP32 rozłączyło połączenie"
+                )
+
+            self.last_rx_time = time.monotonic()
+
+            return data
+
+        except BlockingIOError:
+
+            # ESP normalnie regularnie wysyła POS.
+            # Jeśli przez 3 s nie przyszło absolutnie nic,
+            # traktujemy połączenie jako martwe.
+            if (
+                time.monotonic()
+                - self.last_rx_time
+                > 3.0
+            ):
+
+                print(
+                    "TCP: brak danych przez 3 s, "
+                    "resetuję połączenie"
+                )
+
+                self._disconnect_wifi(sock)
+
+                raise ConnectionError(
+                    "TCP: timeout odbioru"
+                )
+
+            return b""
+
+        except OSError:
+
+            self._disconnect_wifi(sock)
+
+            raise
+
+    # --------------------------------------------------
+    # CLOSE
+    # --------------------------------------------------
+
     def close(self):
+
+        self.stop_event.set()
+
         if self.serial_port is not None:
-            self.serial_port.close()
-        if self.socket is not None:
-            self.socket.close()
+            try:
+                self.serial_port.close()
+            except OSError:
+                pass
+
+        self._disconnect_wifi()
 
 
 connection = PlotterConnection()
@@ -505,11 +810,7 @@ ui_batch = pyglet.graphics.Batch()
 
 gcode_batch = pyglet.graphics.Batch()
 
-gcode_document = UnformattedDocument(
-    """M5
-G0 X0 Y0
-"""
-)
+gcode_document = UnformattedDocument("")
 
 gcode_document.set_style(
     0,
@@ -585,6 +886,71 @@ send_gcode_label = pyglet.text.Label(
     color=(255, 255, 255, 255)
 )
 
+RUN_GCODE_WIDTH = 170
+RUN_GCODE_HEIGHT = 35
+
+run_gcode_button = shapes.Rectangle(
+    0,
+    0,
+    RUN_GCODE_WIDTH,
+    RUN_GCODE_HEIGHT,
+    color=(60, 110, 200)
+)
+
+# --------------------------------------------------
+# Przycisk ENABLE / DISABLE
+# --------------------------------------------------
+
+ENABLE_BUTTON_WIDTH = 100
+ENABLE_BUTTON_HEIGHT = 25
+ENABLE_BUTTON_GAP = 10
+
+enable_button = shapes.Rectangle(
+    0,
+    0,
+    ENABLE_BUTTON_WIDTH,
+    ENABLE_BUTTON_HEIGHT,
+    color=(100, 100, 100)
+)
+
+enable_label = pyglet.text.Label(
+    "DISABLE",
+    anchor_x="center",
+    anchor_y="center",
+    color=(255, 255, 255, 255),
+    font_size=12
+)
+
+# --------------------------------------------------
+# Przycisk STOP
+# --------------------------------------------------
+
+STOP_BUTTON_WIDTH = 100
+STOP_BUTTON_HEIGHT = 25
+STOP_BUTTON_GAP = 10
+
+stop_button = shapes.Rectangle(
+    0,
+    0,
+    STOP_BUTTON_WIDTH,
+    STOP_BUTTON_HEIGHT,
+    color=(190, 50, 50)
+)
+
+stop_label = pyglet.text.Label(
+    "STOP",
+    anchor_x="center",
+    anchor_y="center",
+    color=(255, 255, 255, 255),
+    font_size=12
+)
+
+run_gcode_label = pyglet.text.Label(
+    "RUN G-CODE",
+    anchor_x="center",
+    anchor_y="center",
+    color=(255, 255, 255, 255)
+)
 
 gcode_toggle_button = shapes.Rectangle(
     0,
@@ -731,34 +1097,20 @@ initial_text = "Tablet: niepodłączony | kliknij obszar rysowania"
 
 
 position_label = pyglet.text.Label(
-
     initial_text,
-
-    x=45,
-
-    y=15,
-
+    x=5,
+    y=4,
+    anchor_y="bottom",
     color=(0, 0, 0, 255)
-
 )
-
-
 
 pos_label = pyglet.text.Label(
-
     "POS: brak",
-
-    x=45,
-
-    y=35,
-
+    x=5,
+    y=22,
+    anchor_y="bottom",
     color=(0, 120, 0, 255)
-
 )
-
-
-
-
 
 # --------------------------------------------------
 
@@ -812,23 +1164,20 @@ clear_label = pyglet.text.Label(
 
 )
 
+PEN_UP_COLOR = (0, 200, 0)
+PEN_DOWN_COLOR = (0, 80, 220)
 
+pen_down = False
+
+plotter_draw_x = None
+plotter_draw_y = None   
 
 tip_marker = shapes.Circle(
-
     0,
-
     0,
-
     radius=7,
-
-    color=(0, 200, 0)
-
+    color=PEN_UP_COLOR
 )
-
-
-
-
 
 # --------------------------------------------------
 
@@ -956,8 +1305,10 @@ def clear_drawing():
 @window.event
 def on_mouse_press(x, y, button, modifiers):
 
+    global tablet_control_enabled
     global gcode_panel_open
     global gcode_editor_focused
+    global motors_enabled
 
     if button != mouse.LEFT:
         return
@@ -1043,21 +1394,76 @@ def on_mouse_press(x, y, button, modifiers):
         ).start()
         return
 
+    # --------------------------------------------------
+    # RUN G-CODE
+    # --------------------------------------------------
+
+    if (
+        gcode_panel_open
+        and is_inside_rectangle(
+            x,
+            y,
+            run_gcode_button
+        )
+    ):
+        send_command(
+            "GCODE_RUN"
+        )
+
+        return
+
+    # --------------------------------------------------
+    # STOP
+    # --------------------------------------------------
+
+    if is_inside_rectangle(
+        x,
+        y,
+        stop_button
+    ):
+        tablet_control_enabled = False
+
+        send_command("stop")
+
+        return
+
+    # --------------------------------------------------
+    # ENABLE / DISABLE
+    # --------------------------------------------------
+
+    if is_inside_rectangle(
+        x,
+        y,
+        enable_button
+    ):
+        if motors_enabled:
+            # DISABLE po stronie ESP robi też STOP.
+            tablet_control_enabled = False
+
+            send_command("DISABLE")
+        else:
+            send_command("ENABLE")
+
+        return
 
     # --------------------------------------------------
     # HOME
     # --------------------------------------------------
 
-    if is_inside_rectangle(x, y, home_button):
+    if is_inside_rectangle(
+        x,
+        y,
+        home_button
+    ):
+        if not motors_enabled:
+            print("PC: HOME blocked - motors disabled")
+            return
 
         if home_state != HOME_HOMING:
-
             set_home_state(HOME_HOMING)
-
             send_command("home")
 
         return
-
 
     # --------------------------------------------------
     # WYCZYŚĆ
@@ -1081,7 +1487,11 @@ def on_mouse_press(x, y, button, modifiers):
 
     if inside_drawing_area:
 
+        tablet_control_enabled = True
+
         connect_tablet()
+
+        print("PC: Tablet control enabled")
 
         return
 
@@ -1184,11 +1594,12 @@ def send_tablet_position(
 ):
 
     global last_send_time
-
-
+    global tablet_control_enabled
 
     if homing_active:
+        return
 
+    if not tablet_control_enabled:
         return
 
 
@@ -1468,6 +1879,12 @@ def update_drawing_lines():
 
 def handle_esp_line(line):
 
+    global motors_enabled
+    global tablet_control_enabled
+    global pen_down
+    global plotter_draw_x
+    global plotter_draw_y
+
     global tip_position
 
     global last_pos_debug_time
@@ -1477,10 +1894,31 @@ def handle_esp_line(line):
 
 
     if not line:
+        return
+
+    if line == "PEN DOWN":
+        pen_down = True
+        tip_marker.color = PEN_DOWN_COLOR
+
+        with tip_position_lock:
+            if tip_position is not None:
+                plotter_draw_x = tip_position[0]
+                plotter_draw_y = tip_position[1]
+            else:
+                plotter_draw_x = None
+                plotter_draw_y = None
 
         return
 
 
+    if line == "PEN UP":
+        pen_down = False
+        tip_marker.color = PEN_UP_COLOR
+
+        plotter_draw_x = None
+        plotter_draw_y = None
+
+        return
 
     if line in ("HOME sequence started", "HOME ACCEPTED"):
 
@@ -1512,14 +1950,10 @@ def handle_esp_line(line):
 
 
 
-    if line.startswith("HOME ERROR") or line in (
-
-        "HOME ABORTED",
-
-        "ALL STOPPED",
-
+    if (
+        line.startswith("HOME ERROR")
+        or line == "HOME ABORTED"
     ):
-
         set_home_state(HOME_IDLE)
 
         print("PC: Homing interrupted")
@@ -1527,102 +1961,151 @@ def handle_esp_line(line):
         return
 
 
+    if line == "ALL STOPPED":
 
-    parts = line.split()
+        if homing_active:
+            set_home_state(HOME_IDLE)
 
-
-
-    if len(parts) == 3 and parts[0] == "POS":
-
-        try:
-
-            x = float(parts[1])
-
-            y = float(parts[2])
-
-
-
-            if home_state == HOME_READY:
-
-                    if abs(x) > 0.5 or abs(y) > 0.5:
-
-                        set_home_state(HOME_MOVED)
-
-
-
-
-
-        except ValueError:
-
-            print("BAD POS:", repr(line))
-
-            return
-
-
-
-        # Filtr tylko diagnostyczny:
-
-        # odrzucamy NaN / inf / absurdalne wartości.
-
-        if not (-10000.0 < x < 10000.0):
-
-            print("BAD POS X:", repr(line))
-
-            return
-
-
-
-        if not (-10000.0 < y < 10000.0):
-
-            print("BAD POS Y:", repr(line))
-
-            return
-
-
-
-        with tip_position_lock:
-
-            tip_position = (x, y)
-
-
-
-        pos_label.text = (
-
-            f"POS: X={x:8.3f}  Y={y:8.3f}"
-
-        )
-
-
-
-        now = time.monotonic()
-
-
-
-        if (
-
-            DEBUG_POS
-
-            and now - last_pos_debug_time >= 0.5
-
-        ):
-
-            last_pos_debug_time = now
-
-            # print(
-
-            #     f"POS OK: "
-
-            #     f"{x:9.3f} "
-
-            #     f"{y:9.3f}"
-
-            # )
-
-
+            print("PC: Homing interrupted")
+        else:
+            print("PC: Motion stopped")
 
         return
 
 
+    parts = line.split()
+
+    if line == "MOTORS DISABLED":
+        motors_enabled = False
+        tablet_control_enabled = False
+
+        enable_label.text = "ENABLE"
+
+        set_home_state(HOME_IDLE)
+
+        print("PC: Motors disabled")
+
+        return
+
+
+    if line == "MOTORS ENABLED":
+        motors_enabled = True
+
+        enable_label.text = "DISABLE"
+
+        print("PC: Motors enabled")
+
+        return
+
+    if len(parts) == 3 and parts[0] == "POS":
+
+        try:
+            x = float(parts[1])
+            y = float(parts[2])
+
+            if home_state == HOME_READY:
+                if abs(x) > 0.5 or abs(y) > 0.5:
+                    set_home_state(HOME_MOVED)
+
+        except ValueError:
+            print("BAD POS:", repr(line))
+            return
+
+        if not (-10000.0 < x < 10000.0):
+            print("BAD POS X:", repr(line))
+            return
+
+        if not (-10000.0 < y < 10000.0):
+            print("BAD POS Y:", repr(line))
+            return
+
+        if pen_down:
+
+            if (
+                plotter_draw_x is not None
+                and plotter_draw_y is not None
+            ):
+                dx = x - plotter_draw_x
+                dy = y - plotter_draw_y
+
+                distance_sq = dx * dx + dy * dy
+
+                if distance_sq >= (
+                    PLOTTER_DRAW_MIN_DISTANCE_MM
+                    * PLOTTER_DRAW_MIN_DISTANCE_MM
+                ):
+                    x1_mm = (
+                        plotter_draw_x
+                        + A4_WIDTH_MM / 2.0
+                    )
+
+                    y1_mm = (
+                        plotter_draw_y
+                        + A4_HEIGHT_MM / 2.0
+                    )
+
+                    x2_mm = (
+                        x
+                        + A4_WIDTH_MM / 2.0
+                    )
+
+                    y2_mm = (
+                        y
+                        + A4_HEIGHT_MM / 2.0
+                    )
+
+                    x1_screen, y1_screen = page_mm_to_screen(
+                        x1_mm,
+                        y1_mm
+                    )
+
+                    x2_screen, y2_screen = page_mm_to_screen(
+                        x2_mm,
+                        y2_mm
+                    )
+
+                    shape = shapes.Line(
+                        x1_screen,
+                        y1_screen,
+                        x2_screen,
+                        y2_screen,
+                        thickness=2,
+                        color=(0, 80, 220),
+                        batch=drawing_batch
+                    )
+
+                    lines.append(
+                        {
+                            "shape": shape,
+                            "x1_mm": x1_mm,
+                            "y1_mm": y1_mm,
+                            "x2_mm": x2_mm,
+                            "y2_mm": y2_mm
+                        }
+                    )
+
+                    plotter_draw_x = x
+                    plotter_draw_y = y
+
+        with tip_position_lock:
+            tip_position = (x, y)
+
+        pos_label.text = (
+            f"POS: X={x:8.3f}  Y={y:8.3f}"
+        )
+
+        now = time.monotonic()
+
+        if (
+            DEBUG_POS
+            and now - last_pos_debug_time >= 0.5
+        ):
+            last_pos_debug_time = now
+
+        return
+
+    if line == "PONG":
+        return
 
     print("ESP:", line)
 
@@ -1634,47 +2117,40 @@ def read_esp(dt):
 
     global rx_buffer
 
-
+    connection.ensure_reconnect()
 
     try:
 
-        data = connection.receive().decode("ascii", errors="ignore")
+        data = connection.receive().decode(
+            "ascii",
+            errors="ignore"
+        )
 
         if not data:
             return
 
-
-
         rx_buffer += data
-
-
 
         while "\n" in rx_buffer:
 
             line, rx_buffer = rx_buffer.split(
-
                 "\n",
-
                 1
-
             )
-
-
 
             handle_esp_line(
-
                 line.strip()
-
             )
 
+    except (
+        serial.SerialException,
+        OSError
+    ) as e:
 
-
-    except (serial.SerialException, OSError) as e:
-
-        print("RX error:", e)
-
-
-
+        print(
+            "RX error:",
+            e
+        )
 
 
 # --------------------------------------------------
@@ -1723,28 +2199,59 @@ def on_resize(width, height):
 
 
     # --------------------------------------------------
-    # HOME
+    # HOME + STOP + ENABLE/DISABLE
     # --------------------------------------------------
-
 
     if gcode_panel_open:
         drawing_width = width - GCODE_PANEL_WIDTH
-        home_button.x = drawing_width - HOME_BUTTON_WIDTH - HOME_BUTTON_MARGIN
+
+        enable_button.x = (
+            drawing_width
+            - ENABLE_BUTTON_WIDTH
+            - HOME_BUTTON_MARGIN
+        )
     else:
         drawing_width = width
-        home_button.x = (
+
+        enable_button.x = (
             width
             - GCODE_TOGGLE_WIDTH
-            - HOME_BUTTON_WIDTH
+            - ENABLE_BUTTON_WIDTH
             - HOME_BUTTON_MARGIN
             - 20
         )
 
-    home_button.y = (
+
+    enable_button.y = (
         height
-        - HOME_BUTTON_HEIGHT
+        - ENABLE_BUTTON_HEIGHT
         - HOME_BUTTON_MARGIN
     )
+
+
+    # STOP po lewej od ENABLE/DISABLE
+
+    stop_button.x = (
+        enable_button.x
+        - STOP_BUTTON_WIDTH
+        - ENABLE_BUTTON_GAP
+    )
+
+    stop_button.y = enable_button.y
+
+
+    # HOME po lewej od STOP
+
+    home_button.x = (
+        stop_button.x
+        - HOME_BUTTON_WIDTH
+        - STOP_BUTTON_GAP
+    )
+
+    home_button.y = enable_button.y
+
+
+    # HOME label
 
     home_label.x = (
         home_button.x
@@ -1756,6 +2263,32 @@ def on_resize(width, height):
         + home_button.height / 2
     )
 
+
+    # STOP label
+
+    stop_label.x = (
+        stop_button.x
+        + stop_button.width / 2
+    )
+
+    stop_label.y = (
+        stop_button.y
+        + stop_button.height / 2
+    )
+
+
+    # ENABLE / DISABLE label
+
+    enable_label.x = (
+        enable_button.x
+        + enable_button.width / 2
+    )
+
+    enable_label.y = (
+        enable_button.y
+        + enable_button.height / 2
+    )
+    
     # --------------------------------------------------
     # Panel G-code
     # --------------------------------------------------
@@ -1780,7 +2313,7 @@ def on_resize(width, height):
 
         editor_width = (
             GCODE_PANEL_WIDTH
-            - 2 * GCODE_PANEL_MARGIN
+            - 2 * GCODE_PANEL_MARGIN    
         )
 
         editor_height = height - 130
@@ -1819,14 +2352,30 @@ def on_resize(width, height):
         )
 
 
-        send_gcode_button.x = (
-            panel_x
-            + GCODE_PANEL_WIDTH / 2
-            - SEND_GCODE_WIDTH / 2
+        BUTTON_GAP = 10
+
+        total_width = (
+            SEND_GCODE_WIDTH
+            + BUTTON_GAP
+            + RUN_GCODE_WIDTH
         )
 
+        buttons_x = (
+            panel_x
+            + GCODE_PANEL_WIDTH / 2
+            - total_width / 2
+        )
+
+        send_gcode_button.x = buttons_x
         send_gcode_button.y = 20
 
+        run_gcode_button.x = (
+            send_gcode_button.x
+            + SEND_GCODE_WIDTH
+            + BUTTON_GAP
+        )
+
+        run_gcode_button.y = 20
 
     else:
 
@@ -1842,6 +2391,11 @@ def on_resize(width, height):
             - 10
         )
 
+    position_label.x = 5
+    position_label.y = 4
+
+    pos_label.x = 5
+    pos_label.y = 22
 
     # --------------------------------------------------
     # Napisy przycisków
@@ -1868,6 +2422,15 @@ def on_resize(width, height):
         + send_gcode_button.height / 2
     )
 
+    run_gcode_label.x = (
+        run_gcode_button.x
+        + run_gcode_button.width / 2
+    )
+
+    run_gcode_label.y = (
+        run_gcode_button.y
+        + run_gcode_button.height / 2
+    )
 
     update_drawing_lines()
 
@@ -1905,6 +2468,9 @@ def on_draw():
         send_gcode_button.draw()
 
         send_gcode_label.draw()
+
+        run_gcode_button.draw()
+        run_gcode_label.draw()
 
 
     # Przycisk otwierania panelu jest zawsze widoczny
@@ -1951,6 +2517,18 @@ def on_draw():
     home_button.draw()
 
     home_label.draw()
+
+    stop_button.draw()
+    stop_label.draw()
+
+    home_button.draw()
+    home_label.draw()
+
+    stop_button.draw()
+    stop_label.draw()
+
+    enable_button.draw()
+    enable_label.draw()
 
 
 

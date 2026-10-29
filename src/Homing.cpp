@@ -10,7 +10,7 @@ bool Homing::update()
     switch (homingState) {
 
     case 1: {
-        tmc.rms_current(500);
+        tmc.rms_current(600);
         tmc.en_spreadCycle(false);
         tmc.pwm_autoscale(true);
 
@@ -56,4 +56,12 @@ bool Homing::update()
     }
 
     return false;
+}
+
+void Homing::abort()
+{
+    motor.stop();
+
+    active = false;
+    homingState = 0;
 }

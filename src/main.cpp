@@ -16,10 +16,18 @@
 #include "freertos/queue.h"
 #include "GCodeStorage.hpp"
 #include "GCodeProgram.hpp"
+#include "esp_system.h"
 
-constexpr bool BYPASS_HOME = true;
+RTC_DATA_ATTR uint32_t lastCrashStage = 0;
+
+esp_reset_reason_t bootResetReason =
+    ESP_RST_UNKNOWN;
+
+
+constexpr bool BYPASS_HOME = false;
 
 void testReadGCode();
+void stopPlotter();
 
 // --------------------------------------------------
 // Konfiguracja WIFI
@@ -32,6 +40,7 @@ void setupWiFi()
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
     Serial.print("Connecting to WiFi");
+
 
     unsigned long start = millis();
 
@@ -507,6 +516,18 @@ void tcpTask(void* parameter)
                 Serial.println(
                     "TCP client connected"
                 );
+
+                char diagnostic[96];
+
+                snprintf(
+                    diagnostic,
+                    sizeof(diagnostic),
+                    "BOOT RESET=%d CRASH_STAGE=%u",
+                    static_cast<int>(bootResetReason),
+                    static_cast<unsigned>(lastCrashStage)
+                );
+
+                client.println(diagnostic);
             }
         }
 
@@ -629,6 +650,16 @@ void tcpTask(void* parameter)
                         // ==================================
 
                         if (
+                            strcmp(
+                                command.text,
+                                "PING"
+                            ) == 0
+                        )
+                        {
+                            sendResponse("PONG");
+                        }
+
+                        else if (
                             strncmp(
                                 command.text,
                                 "GCODE_UPLOAD ",
@@ -901,7 +932,7 @@ void tcpTask(void* parameter)
 
 void processTcpCommands()
 {
-    TcpCommand command;
+    TcpCommand command = {};
 
     if (
         tcpCommands != nullptr &&
@@ -934,6 +965,7 @@ void processTcpCommands()
                 );
             }
         }
+
         else if (
             strcmp(
                 command.text,
@@ -941,18 +973,56 @@ void processTcpCommands()
             ) == 0
         )
         {
-            gcodeProgram.stop();
+            stopPlotter();
+        }
 
-            serialCommandHandler.processCommand(
-                command.text
+        else if (
+            strcmp(
+                command.text,
+                "DISABLE"
+            ) == 0
+        )
+        {
+            stopPlotter();
+
+            motor1.disable();
+            motor2.disable();
+
+            motor1Homed = false;
+            motor2Homed = false;
+
+            homeState = 0;
+
+            pen.up();
+
+            sendResponse(
+                "MOTORS DISABLED"
             );
         }
+
+        else if (
+            strcmp(
+                command.text,
+                "ENABLE"
+            ) == 0
+        )
+        {
+            motor1.enable();
+            motor2.enable();
+
+            sendResponse(
+                "MOTORS ENABLED"
+            );
+        }
+
         else
         {
             serialCommandHandler.processCommand(
                 command.text
             );
         }
+
+        
     }
 
     // Następnie tylko najnowsza pozycja tabletu.
@@ -974,6 +1044,48 @@ void processTcpCommands()
     }
 }
 
+void stopPlotter()
+{
+    bool wasHoming =
+        isHomeSequenceActive();
+
+    // Zatrzymaj G-code
+    gcodeProgram.stop();
+
+    // Zatrzymaj tablet
+    motionManager.clearLiveTarget();
+
+    // Usuń przygotowany ruch
+    motionManager.clearPreparedMotion();
+
+    // Usuń oczekującą komendę tabletu
+    if (tabletCommands != nullptr)
+    {
+        xQueueReset(tabletCommands);
+    }
+
+    // Anuluj HOME
+    if (wasHoming)
+    {
+        homingMotor1.abort();
+        homingMotor2.abort();
+
+        motor1Homed = false;
+        motor2Homed = false;
+
+        homeState = 0;
+
+        sendResponse(
+            "HOME ABORTED"
+        );
+    }
+
+    // Zatrzymaj executory i silniki
+    serialCommandHandler.processCommand(
+        "stop"
+    );
+}
+
 // --------------------------------------------------
 // setup
 // --------------------------------------------------
@@ -981,8 +1093,15 @@ void processTcpCommands()
 void setup() {
     
     Serial.begin(DEBUG_BAUD_RATE);
-
     delay(200);
+
+    bootResetReason = esp_reset_reason();
+
+    Serial.println();
+    Serial.print("RESET REASON: ");
+    Serial.println(
+        static_cast<int>(esp_reset_reason())
+    );
 
     Serial.println();
     Serial.println("Start programu");
@@ -1140,6 +1259,7 @@ void setup() {
 
 void loop()
 {
+
     serialCommandHandler.readSerialCommands();
     processTcpCommands();
 

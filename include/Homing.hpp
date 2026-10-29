@@ -9,7 +9,7 @@ class Homing {
 private:
     size_t homingState = 0;
 
-    uint8_t stallThreshold = 50;
+    uint8_t stallThreshold = 45;
 
     int diagPin;
     bool direction;
@@ -43,4 +43,6 @@ public:
     bool isActive() const {
         return active;
     }
+
+    void abort();   
 };

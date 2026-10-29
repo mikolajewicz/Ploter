@@ -1,5 +1,7 @@
 #include "PenController.hpp"
 
+extern void sendResponse(const char* message);
+
 PenController::PenController(
     uint8_t pin,
     int upAngle,
@@ -28,12 +30,14 @@ void PenController::up()
 {
     servo.write(upAngle);
     penDown = false;
+    sendResponse("PEN UP");
 }
 
 void PenController::down()
 {
     servo.write(downAngle);
     penDown = true;
+    sendResponse("PEN DOWN");
 }
 
 void PenController::setPressure(double pressure)
