@@ -2112,7 +2112,6 @@ def handle_esp_line(line):
 
 
 
-
 def read_esp(dt):
 
     global rx_buffer
