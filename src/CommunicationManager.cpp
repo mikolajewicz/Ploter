@@ -127,6 +127,187 @@ void sendResponse(const char* message)
     communication.sendResponse(message);
 }
 
+void processCommand(const char* text)
+{
+    TcpCommand command = {};
+
+   if (text == nullptr)
+    {
+        return;
+    }
+
+    size_t length = strlen(text);
+
+    if (length >= sizeof(command.text))
+    {
+        sendResponse("ERR COMMAND TOO LONG");
+        return;
+    }
+
+    memcpy(command.text, text, length + 1);
+
+    // ==================================
+    // GCODE_UPLOAD
+    // ==================================
+
+    if (
+        strcasecmp(command.text, "PING") == 0
+    )
+    {
+        sendResponse("PONG");
+    }
+
+    else if (
+        strncmp(
+            command.text,
+            "GCODE_UPLOAD ",
+            13
+        ) == 0
+    )
+    {
+        char* endPointer = nullptr;
+
+        unsigned long size =
+            strtoul(
+                command.text + 13,
+                &endPointer,
+                10
+            );
+
+        if (
+            endPointer == command.text + 13
+            ||
+            *endPointer != '\0'
+            ||
+            size == 0
+        )
+        {
+            sendResponse(
+                "ERR GCODE SIZE"
+            );
+        }
+        else
+        {
+            bool started =
+                gcodeStorage.beginUpload(
+                    static_cast<size_t>(
+                        size
+                    )
+                );
+
+            if (!started)
+            {
+                sendResponse(
+                    "ERR GCODE OPEN"
+                );
+            }
+            else
+            {
+                char response[80];
+
+                snprintf(
+                    response,
+                    sizeof(response),
+                    "GCODE READY %u",
+                    static_cast<unsigned>(
+                        size
+                    )
+                );
+
+                sendResponse(
+                    response
+                );
+            }
+        }
+    }
+
+    // ==================================
+    // TABLET
+    // ==================================
+
+    else if (
+        strncmp(
+            command.text,
+            "tablet ",
+            7
+        ) == 0
+    )
+    {
+        // Zachowujemy tylko
+        // najnowszy cel tabletu.
+        if (
+            tabletCommands
+            != nullptr
+        )
+        {
+            xQueueOverwrite(
+                tabletCommands,
+                &command
+            );
+        }
+    }
+
+
+    // ==================================
+    // STOP
+    // ==================================
+
+    else if (
+        strcmp(
+            command.text,
+            "stop"
+        ) == 0
+    )
+    {
+        // STOP ma pierwszeństwo.
+        if (
+            tcpCommands
+            != nullptr
+        )
+        {
+            if (
+                xQueueSendToFront(
+                    tcpCommands,
+                    &command,
+                    0
+                ) != pdTRUE
+            )
+            {
+                Serial.println(
+                    "WARN TCP command queue full"
+                );
+            }
+        }
+    }
+
+
+    // ==================================
+    // POZOSTAŁE KOMENDY
+    // ==================================
+
+    else
+    {
+        if (
+            tcpCommands
+            != nullptr
+        )
+        {
+            if (
+                xQueueSend(
+                    tcpCommands,
+                    &command,
+                    0
+                ) != pdTRUE
+            )
+            {
+                Serial.println(
+                    "WARN TCP command queue full"
+                );
+            }
+        }
+    }
+}
+
 void tcpTask(void* parameter)
 {
     
@@ -379,189 +560,19 @@ void tcpTask(void* parameter)
                     {
                         buffer[length] = '\0';
 
-
-                        TcpCommand command = {};
-
-                        memcpy(
-                            command.text,
-                            buffer,
-                            length + 1
+                        processCommand(
+                            buffer
                         );
-
-
-                        // ==================================
-                        // GCODE_UPLOAD
-                        // ==================================
-
-                        if (
-                            strcasecmp(command.text, "PING") == 0
-                        )
-                        {
-                            sendResponse("PONG");
-                        }
-
-                        else if (
-                            strncmp(
-                                command.text,
-                                "GCODE_UPLOAD ",
-                                13
-                            ) == 0
-                        )
-                        {
-                            char* endPointer = nullptr;
-
-                            unsigned long size =
-                                strtoul(
-                                    command.text + 13,
-                                    &endPointer,
-                                    10
-                                );
-
-                            if (
-                                endPointer == command.text + 13
-                                ||
-                                *endPointer != '\0'
-                                ||
-                                size == 0
-                            )
-                            {
-                                sendResponse(
-                                    "ERR GCODE SIZE"
-                                );
-                            }
-                            else
-                            {
-                                bool started =
-                                    gcodeStorage.beginUpload(
-                                        static_cast<size_t>(
-                                            size
-                                        )
-                                    );
-
-                                if (!started)
-                                {
-                                    sendResponse(
-                                        "ERR GCODE OPEN"
-                                    );
-                                }
-                                else
-                                {
-                                    char response[80];
-
-                                    snprintf(
-                                        response,
-                                        sizeof(response),
-                                        "GCODE READY %u",
-                                        static_cast<unsigned>(
-                                            size
-                                        )
-                                    );
-
-                                    sendResponse(
-                                        response
-                                    );
-                                }
-                            }
-                        }
-
-                        // ==================================
-                        // TABLET
-                        // ==================================
-
-                        else if (
-                            strncmp(
-                                command.text,
-                                "tablet ",
-                                7
-                            ) == 0
-                        )
-                        {
-                            // Zachowujemy tylko
-                            // najnowszy cel tabletu.
-                            if (
-                                tabletCommands
-                                != nullptr
-                            )
-                            {
-                                xQueueOverwrite(
-                                    tabletCommands,
-                                    &command
-                                );
-                            }
-                        }
-
-
-                        // ==================================
-                        // STOP
-                        // ==================================
-
-                        else if (
-                            strcmp(
-                                command.text,
-                                "stop"
-                            ) == 0
-                        )
-                        {
-                            // STOP ma pierwszeństwo.
-                            if (
-                                tcpCommands
-                                != nullptr
-                            )
-                            {
-                                if (
-                                    xQueueSendToFront(
-                                        tcpCommands,
-                                        &command,
-                                        0
-                                    ) != pdTRUE
-                                )
-                                {
-                                    Serial.println(
-                                        "WARN TCP command queue full"
-                                    );
-                                }
-                            }
-                        }
-
-
-                        // ==================================
-                        // POZOSTAŁE KOMENDY
-                        // ==================================
-
-                        else
-                        {
-                            if (
-                                tcpCommands
-                                != nullptr
-                            )
-                            {
-                                if (
-                                    xQueueSend(
-                                        tcpCommands,
-                                        &command,
-                                        0
-                                    ) != pdTRUE
-                                )
-                                {
-                                    Serial.println(
-                                        "WARN TCP command queue full"
-                                    );
-                                }
-                            }
-                        }
                     }
-
 
                     // Przygotowanie na następną linię.
                     length = 0;
                     discardLine = false;
                 }
 
-
                 // ------------------------------------------
                 // Zwykły znak linii
                 // ------------------------------------------
-
                 else if (!discardLine)
                 {
                     if (
@@ -670,4 +681,5 @@ void tcpTask(void* parameter)
         );
     }
 }
+
 
