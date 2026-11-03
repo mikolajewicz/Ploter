@@ -32,11 +32,20 @@ extern QueueHandle_t tcpPosition;
 // CommunicationManager
 // ----------------------------------------
 
+enum class InputSource : uint8_t
+{
+    NONE,
+    TCP,
+    USB
+};
+
 class CommunicationManager
 {
 public:
     bool begin();
     void sendResponse(const char* message);
+    void processCommand(InputSource source, const char* text);
+    void readUsbCommands();
 };
 
 // Globalny obiekt komunikacji

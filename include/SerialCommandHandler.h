@@ -52,7 +52,6 @@ private:
         String line
     );
 
-    void updatePendingMotion();
 
     bool motionCommandPending_ = false;
     uint32_t motionCommandQueuedAt_ = 0;
@@ -127,4 +126,6 @@ public:
         double speed,
         double timeStep
     );
+
+    void updatePendingMotion();
 };

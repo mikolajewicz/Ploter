@@ -11,7 +11,7 @@ extern uint32_t lastCrashStage;
 constexpr uint16_t TCP_PORT = 5000;
 
 WiFiServer tcpServer(TCP_PORT);
-
+InputSource uploadSource = InputSource::NONE;
 
 // ----------------------------------------
 // Globalne kolejki FreeRTOS
@@ -127,7 +127,10 @@ void sendResponse(const char* message)
     communication.sendResponse(message);
 }
 
-void processCommand(const char* text)
+void CommunicationManager::processCommand(
+    InputSource source,
+    const char* text
+)
 {
     TcpCommand command = {};
 
@@ -188,6 +191,12 @@ void processCommand(const char* text)
         }
         else
         {
+            if (gcodeStorage.isUploading())
+            {
+                sendResponse("ERR GCODE BUSY");
+                return;
+            }
+
             bool started =
                 gcodeStorage.beginUpload(
                     static_cast<size_t>(
@@ -213,6 +222,8 @@ void processCommand(const char* text)
                         size
                     )
                 );
+
+                uploadSource = source;
 
                 sendResponse(
                     response
@@ -308,6 +319,56 @@ void processCommand(const char* text)
     }
 }
 
+
+bool processUploadByte(
+    InputSource source,
+    uint8_t byte
+)
+{
+    if (!gcodeStorage.isUploading())
+    {
+        return false;
+    }
+
+    // Upload należy do innego połączenia.
+    if (uploadSource != source)
+    {
+        return false;
+    }
+
+    bool ok = gcodeStorage.writeByte(byte);
+
+    if (!ok)
+    {
+        gcodeStorage.abortUpload();
+
+        uploadSource = InputSource::NONE;
+
+        sendResponse("ERR GCODE WRITE");
+
+        return true;
+    }
+
+    if (gcodeStorage.getUploadRemaining() == 0)
+    {
+        bool finished = gcodeStorage.finishUpload();
+
+        uploadSource = InputSource::NONE;
+
+        if (finished)
+        {
+            sendResponse("GCODE STORED");
+        }
+        else
+        {
+            sendResponse("ERR GCODE STORE");
+        }
+    }
+
+    return true;
+}
+
+
 void tcpTask(void* parameter)
 {
     
@@ -331,7 +392,11 @@ void tcpTask(void* parameter)
 
     auto resetConnection = [&]()
     {
-        gcodeStorage.abortUpload();
+        if (uploadSource == InputSource::TCP)
+        {
+            gcodeStorage.abortUpload();
+            uploadSource = InputSource::NONE;
+        }
 
         client.stop();
 
@@ -357,12 +422,12 @@ void tcpTask(void* parameter)
         }
 
         // Usuwamy stare pozycje tabletu.
-        if (tabletCommands != nullptr)
-        {
-            xQueueReset(
-                tabletCommands
-            );
-        }
+        // if (tabletCommands != nullptr)
+        // {
+        //     xQueueReset(
+        //         tabletCommands
+        //     );
+        // }
 
         // tcpCommands celowo nie czyścimy.
     };
@@ -374,6 +439,23 @@ void tcpTask(void* parameter)
 
     while (true)
     {
+
+        // static uint32_t lastTcpDebug = 0;
+
+        // if (millis() - lastTcpDebug >= 2000)
+        // {
+        //     lastTcpDebug = millis();
+
+        //     Serial.printf(
+        //         "TCP DEBUG: wifi=%d ip=%s server=%d client=%d heap=%u\n",
+        //         static_cast<int>(WiFi.status()),
+        //         WiFi.localIP().toString().c_str(),
+        //         serverStarted ? 1 : 0,
+        //         client.connected() ? 1 : 0,
+        //         ESP.getFreeHeap()
+        //     );
+        // }
+
         // --------------------------------------------------
         // Brak Wi-Fi
         // --------------------------------------------------
@@ -444,15 +526,15 @@ void tcpTask(void* parameter)
 
                 char diagnostic[96];
 
-                snprintf(
-                    diagnostic,
-                    sizeof(diagnostic),
-                    "BOOT RESET=%d CRASH_STAGE=%u",
-                    static_cast<int>(bootResetReason),
-                    static_cast<unsigned>(lastCrashStage)
-                );
+                // snprintf(
+                //     diagnostic,
+                //     sizeof(diagnostic),
+                //     "BOOT RESET=%d CRASH_STAGE=%u",
+                //     static_cast<int>(bootResetReason),
+                //     static_cast<unsigned>(lastCrashStage)
+                // );
 
-                client.println(diagnostic);
+                // client.println(diagnostic);
             }
         }
 
@@ -491,49 +573,21 @@ void tcpTask(void* parameter)
                 // TRYB UPLOADU G-CODE
                 // ==========================================
 
+                if (
+                    processUploadByte(
+                        InputSource::TCP,
+                        static_cast<uint8_t>(c)
+                    )
+                )
+                {
+                    continue;
+                }
+
                 if (gcodeStorage.isUploading())
                 {
-                    bool ok =
-                        gcodeStorage.writeByte(
-                            static_cast<uint8_t>(
-                                c
-                            )
-                        );
-
-                    if (!ok)
-                    {
-                        gcodeStorage.abortUpload();
-
-                        sendResponse(
-                            "ERR GCODE WRITE"
-                        );
-
-                        continue;
-                    }
-
-                    if (
-                        gcodeStorage.getUploadRemaining()
-                        == 0
-                    )
-                    {
-                        if (
-                            gcodeStorage.finishUpload()
-                        )
-                        {
-                            sendResponse(
-                                "GCODE STORED"
-                            );
-
-                        
-                        }
-                        else
-                        {
-                            sendResponse(
-                                "ERR GCODE STORE"
-                            );
-                        }
-                    }
-
+                    // Upload należy do innego interfejsu.
+                    // Na razie nie przyjmujemy wtedy
+                    // dodatkowych komend przez TCP.
                     continue;
                 }
 
@@ -560,7 +614,8 @@ void tcpTask(void* parameter)
                     {
                         buffer[length] = '\0';
 
-                        processCommand(
+                        communication.processCommand(
+                            InputSource::TCP,
                             buffer
                         );
                     }
@@ -682,4 +737,91 @@ void tcpTask(void* parameter)
     }
 }
 
+
+void CommunicationManager::readUsbCommands()
+{
+    static char buffer[112] = {};
+    static size_t length = 0;
+    static bool discardLine = false;
+
+    // Ograniczamy liczbę bajtów przetwarzanych
+    // podczas jednego wywołania.
+    int budget = 256;
+
+    while (
+        Serial.available() > 0 &&
+        budget-- > 0
+    )
+    {
+        int value = Serial.read();
+
+        if (value < 0)
+        {
+            break;
+        }
+
+        char c = static_cast<char>(value);
+
+        // ---------------------------------
+        // Upload G-code przez USB
+        // ---------------------------------
+
+        if (
+            processUploadByte(
+                InputSource::USB,
+                static_cast<uint8_t>(c)
+            )
+        )
+        {
+            continue;
+        }
+
+        // Upload jest aktywny przez TCP.
+        // Nie interpretujemy danych USB.
+        if (gcodeStorage.isUploading())
+        {
+            continue;
+        }
+
+        // ---------------------------------
+        // Zwykłe komendy tekstowe
+        // ---------------------------------
+
+        if (c == '\r')
+        {
+            continue;
+        }
+
+        if (c == '\n')
+        {
+            if (!discardLine && length > 0)
+            {
+                buffer[length] = '\0';
+
+                processCommand(
+                    InputSource::USB,
+                    buffer
+                );
+            }
+
+            length = 0;
+            discardLine = false;
+
+            continue;
+        }
+
+        if (!discardLine)
+        {
+            if (length < sizeof(buffer) - 1)
+            {
+                buffer[length++] = c;
+            }
+            else
+            {
+                length = 0;
+                discardLine = true;
+            }
+        }
+    }
+}
 

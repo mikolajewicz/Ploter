@@ -673,8 +673,11 @@ void setup() {
 void loop()
 {
 
-    serialCommandHandler.readSerialCommands();
+    communication.readUsbCommands();
+
     processTcpCommands();
+
+    serialCommandHandler.updatePendingMotion();
 
 
     // Aktualizacja homingu

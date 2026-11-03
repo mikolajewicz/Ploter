@@ -30,9 +30,6 @@ print("RUNNING:", os.path.abspath(__file__))
 print("================================")
 
 
-
-
-
 # --------------------------------------------------
 
 # Kartka A4
@@ -133,7 +130,7 @@ def page_mm_to_screen(x_mm, y_mm):
 
 
 # Wybierz połączenie: "wifi" lub "usb".
-CONNECTION_MODE = "wifi"
+CONNECTION_MODE = "usb"
 ESP_HOST = "ploter-esp32.local"
 ESP_PORT = 5000
 SERIAL_PORT = "COM5"
@@ -482,27 +479,6 @@ class PlotterConnection:
             return data
 
         except BlockingIOError:
-
-            # ESP normalnie regularnie wysyła POS.
-            # Jeśli przez 3 s nie przyszło absolutnie nic,
-            # traktujemy połączenie jako martwe.
-            if (
-                time.monotonic()
-                - self.last_rx_time
-                > 3.0
-            ):
-
-                print(
-                    "TCP: brak danych przez 3 s, "
-                    "resetuję połączenie"
-                )
-
-                self._disconnect_wifi(sock)
-
-                raise ConnectionError(
-                    "TCP: timeout odbioru"
-                )
-
             return b""
 
         except OSError:
@@ -527,6 +503,10 @@ class PlotterConnection:
 
         self._disconnect_wifi()
 
+from serial.tools import list_ports
+
+for port in list_ports.comports():
+    print("PORT:", port.device, port.description)
 
 connection = PlotterConnection()
 
