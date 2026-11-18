@@ -18,6 +18,7 @@ from pyglet.window import mouse
 from pyglet.text.document import UnformattedDocument
 from pyglet.text.layout import IncrementalTextLayout
 from pyglet.text.caret import Caret
+from pyglet.window import mouse, key
 
 
 
@@ -130,7 +131,7 @@ def page_mm_to_screen(x_mm, y_mm):
 
 
 # Wybierz połączenie: "wifi" lub "usb".
-CONNECTION_MODE = "usb"
+CONNECTION_MODE = "wifi"
 ESP_HOST = "ploter-esp32.local"
 ESP_PORT = 5000
 SERIAL_PORT = "COM5"
@@ -505,9 +506,6 @@ class PlotterConnection:
 
 from serial.tools import list_ports
 
-for port in list_ports.comports():
-    print("PORT:", port.device, port.description)
-
 connection = PlotterConnection()
 
 SEND_INTERVAL = 0.01
@@ -574,45 +572,63 @@ def send_command(command):
         print("TX error:", e)
 
 
+gcode_ready_event = threading.Event()
+gcode_stored_event = threading.Event()
 
-def upload_gcode(gcode):
 
+def upload_gcode(gcode, run_after_upload=False):
     try:
-        # G-code trzymamy jako ASCII.
-        payload = (
-            gcode.rstrip()
-            + "\n"
-        ).encode("ascii")
+        payload = (gcode.rstrip() + "\n").encode("ascii")
 
         header = (
             f"GCODE_UPLOAD {len(payload)}\n"
         ).encode("ascii")
 
-        print(
-            f"Wysyłanie G-code: "
-            f"{len(payload)} bajtów"
-        )
+        gcode_ready_event.clear()
+        gcode_stored_event.clear()
 
-        connection.send_bytes(
-            header + payload
-        )
+        # 1. Zgłoszenie uploadu
+        connection.send_bytes(header)
 
-        print("G-code wysłany do ESP")
+        # 2. Oczekiwanie na gotowość ESP32
+        if not gcode_ready_event.wait(timeout=5.0):
+            print("Błąd: brak GCODE READY")
+            return
 
-    except UnicodeEncodeError:
-        print(
-            "G-code zawiera znaki spoza ASCII"
-        )
+        # 3. Wysyłanie programu
+        print(f"Wysyłanie G-code: {len(payload)} bajtów")
 
-    except (
-        serial.SerialException,
-        OSError,
-        ConnectionError
-    ) as e:
-        print(
-            "Błąd wysyłania G-code:",
-            e
-        )
+        connection.send_bytes(payload)
+
+        # 4. Oczekiwanie na potwierdzenie zapisu
+        if not gcode_stored_event.wait(timeout=15.0):
+            print("Błąd: brak GCODE STORED")
+            return
+
+        print("G-code zapisany w ESP32")
+
+        # 5. Automatyczne uruchomienie
+        if run_after_upload:
+            send_command("GCODE_RUN")
+
+    except (UnicodeEncodeError, serial.SerialException,
+            OSError, ConnectionError) as e:
+        print("Błąd uploadu:", e)
+
+
+def send_and_run_gcode():
+    gcode = gcode_document.text.strip()
+
+    if not gcode:
+        print("G-code jest pusty")
+        return
+
+    threading.Thread(
+        target=upload_gcode,
+        args=(gcode,),
+        kwargs={"run_after_upload": True},
+        daemon=True
+    ).start()
 
 def console_input():
 
@@ -1477,12 +1493,39 @@ def on_mouse_press(x, y, button, modifiers):
 
 @window.event
 def on_text(text):
-
     if (
         gcode_panel_open
         and gcode_editor_focused
     ):
         return gcode_caret.on_text(text)
+
+
+ctrl_enter_pressed = False
+
+
+@window.event
+def on_key_press(symbol, modifiers):
+    global ctrl_enter_pressed
+
+    if (
+        gcode_panel_open
+        and gcode_editor_focused
+        and symbol in (key.ENTER, key.NUM_ENTER)
+        and modifiers & key.MOD_CTRL
+    ):
+        if not ctrl_enter_pressed:
+            ctrl_enter_pressed = True
+            send_and_run_gcode()
+
+        return pyglet.event.EVENT_HANDLED
+
+
+@window.event
+def on_key_release(symbol, modifiers):
+    global ctrl_enter_pressed
+
+    if symbol in (key.ENTER, key.NUM_ENTER):
+        ctrl_enter_pressed = False
 
 
 @window.event
@@ -1858,6 +1901,12 @@ def update_drawing_lines():
 
 
 def handle_esp_line(line):
+
+    if line.startswith("GCODE READY"):
+        gcode_ready_event.set()
+
+    if line == "GCODE STORED":
+        gcode_stored_event.set()
 
     global motors_enabled
     global tablet_control_enabled

@@ -84,6 +84,178 @@ void GCodeInterpreter::processCommand(
     String normalizedLine = line;
     normalizedLine.toUpperCase();
 
+
+    normalizedLine.trim();
+
+    // --------------------------------------------------
+    // MVS - ruch liniowy przez A2B
+    // Bez korzystania z GCodeParser
+    // --------------------------------------------------
+
+    bool isMvs =
+        normalizedLine == "MVS" ||
+        normalizedLine.startsWith("MVS ") ||
+        normalizedLine.startsWith("MVS\t");
+
+    if (isMvs)
+    {
+        double startX = currentX_;
+        double startY = currentY_;
+
+        double targetX = startX;
+        double targetY = startY;
+        double duration = 0.0;
+
+        bool hasX = false;
+        bool hasY = false;
+        bool hasT = false;
+
+        // Odczyt parametrów X, Y i T
+        const char* p = normalizedLine.c_str() + 3;
+
+        while (*p)
+        {
+            while (*p == ' ' || *p == '\t')
+            {
+                ++p;
+            }
+
+            if (*p == '\0')
+            {
+                break;
+            }
+
+            char word = *p++;
+
+            if (word != 'X' && word != 'Y' && word != 'T')
+            {
+                sendResponse("ERR MVS unknown parameter");
+                return;
+            }
+
+            char* end = nullptr;
+            double value = strtod(p, &end);
+
+            if (end == p || !std::isfinite(value))
+            {
+                sendResponse("ERR MVS invalid parameter");
+                return;
+            }
+
+            p = end;
+
+            if (word == 'X')
+            {
+                if (hasX)
+                {
+                    sendResponse("ERR MVS duplicate X");
+                    return;
+                }
+
+                hasX = true;
+
+                targetX = absoluteMode_
+                    ? value
+                    : startX + value;
+            }
+            else if (word == 'Y')
+            {
+                if (hasY)
+                {
+                    sendResponse("ERR MVS duplicate Y");
+                    return;
+                }
+
+                hasY = true;
+
+                targetY = absoluteMode_
+                    ? value
+                    : startY + value;
+            }
+            else
+            {
+                if (hasT)
+                {
+                    sendResponse("ERR MVS duplicate T");
+                    return;
+                }
+
+                hasT = true;
+                duration = value;
+            }
+        }
+
+        // Kontrola parametrów
+        if (!hasX && !hasY)
+        {
+            sendResponse("ERR MVS missing X/Y");
+            return;
+        }
+
+        if (!hasT || duration < 0.05)
+        {
+            sendResponse("ERR MVS invalid T");
+            return;
+        }
+
+        // Kontrola obszaru roboczego
+        if (!std::isfinite(targetX) ||
+            !std::isfinite(targetY) ||
+            !isInsideWorkspace(targetX, targetY))
+        {
+            sendResponse("ERR MVS outside workspace");
+            return;
+        }
+
+        // Około 10 ms między próbkami.
+        // Maksymalnie 600 punktów trajektorii.
+        double segments = std::ceil(duration / 0.01);
+
+        if (segments > GCODE_MAX_LINE_POINTS - 1)
+        {
+            segments = GCODE_MAX_LINE_POINTS - 1;
+        }
+
+        double timeStep = duration / segments;
+
+        // Istniejący planer A2B
+        bool ok = motionManager.planA2B(
+            startX,
+            startY,
+            targetX,
+            targetY,
+            duration,
+            timeStep
+        );
+
+        if (!ok)
+        {
+            sendResponse("ERR MVS queue full");
+            return;
+        }
+
+        // Aktualizacja pozycji logicznej G-code
+        currentX_ = targetX;
+        currentY_ = targetY;
+
+        char response[128];
+
+        snprintf(
+            response,
+            sizeof(response),
+            "MVS %.3f %.3f -> %.3f %.3f T=%.3f",
+            startX,
+            startY,
+            targetX,
+            targetY,
+            duration
+        );
+
+        sendResponse(response);
+        return;
+    }
+
+
     char buffer[112];
     normalizedLine.toCharArray(
         buffer,
@@ -485,18 +657,70 @@ void GCodeInterpreter::processCommand(
         bool clockwise =
             motionCode == 2;
 
-        bool ok =
-            motionManager.planArc(
-                startX,
-                startY,
-                targetX,
-                targetY,
-                centerX,
-                centerY,
-                clockwise,
-                speed,
-                calculateGCodeTimeStep(speed)
-            );
+        
+        double radius = std::hypot(
+            startX - centerX,
+            startY - centerY
+        );
+
+        double endRadius = std::hypot(
+            targetX - centerX,
+            targetY - centerY
+        );
+
+        if (!std::isfinite(radius) ||
+            !std::isfinite(endRadius) ||
+            radius < 0.001 ||
+            std::abs(radius - endRadius) > 0.5)
+        {
+            sendResponse("ERR GCODE invalid arc radius");
+            return;
+        }
+
+        // Kąt początkowy i końcowy
+        double startAngle = std::atan2(
+            startY - centerY,
+            startX - centerX
+        );
+
+        double endAngle = std::atan2(
+            targetY - centerY,
+            targetX - centerX
+        );
+
+        // Dodatnia wartość kąta zakreślanego łuku
+        double sweep = clockwise
+            ? startAngle - endAngle
+            : endAngle - startAngle;
+
+        sweep = std::fmod(sweep, 2.0 * M_PI);
+
+        if (sweep <= 0.0)
+        {
+            sweep += 2.0 * M_PI;
+        }
+
+        // Długość łuku w milimetrach
+        double arcLength = radius * sweep;
+
+        // Ograniczamy liczbę punktów trajektorii
+        double timeStep = calculateGCodeLineTimeStep(
+            speed,
+            arcLength
+        );
+
+        bool ok = motionManager.planArc(
+            startX,
+            startY,
+            targetX,
+            targetY,
+            centerX,
+            centerY,
+            clockwise,
+            speed,
+            timeStep
+        );
+
 
         if (!ok)
         {

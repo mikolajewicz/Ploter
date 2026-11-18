@@ -7,9 +7,9 @@
 #include "Homing.hpp"
 #include "Kinematics.hpp"
 #include "MotionManager.hpp"
+#include "HomingSequence.hpp"
 
-extern bool requestHomeSequence();
-extern bool isHomeSequenceActive();
+extern HomingSequence homingSequence;
 extern void sendResponse(const char* message);
 
 SerialCommandHandler::SerialCommandHandler(
@@ -267,7 +267,7 @@ void SerialCommandHandler::handleSerialCommand(
             return;
         }
 
-        if (requestHomeSequence())
+        if (homingSequence.request())
         {
             sendResponse("HOME ACCEPTED");
         }
@@ -283,6 +283,7 @@ void SerialCommandHandler::handleSerialCommand(
     // GCODE
     // --------------------------------------------
 
+  
     if (group == "gcode")
     {
         if (rest.isEmpty())
@@ -291,7 +292,46 @@ void SerialCommandHandler::handleSerialCommand(
             return;
         }
 
-        gcodeInterpreter_.processCommand(rest, motionManager);
+        String command = rest;
+        command.trim();
+        command.toUpperCase();
+
+        bool isMvs =
+            command == "MVS" ||
+            command.startsWith("MVS ") ||
+            command.startsWith("MVS\t");
+
+        if (isMvs)
+        {
+            if (!homingSequence.isReady())
+            {
+                sendResponse("ERR MVS HOME");
+                return;
+            }
+
+            if (motionManager.isBusy())
+            {
+                sendResponse("ERR MVS BUSY");
+                return;
+            }
+
+            if (!motionManager.calculateCurrentPosition())
+            {
+                sendResponse("ERR MVS POSITION");
+                return;
+            }
+
+            gcodeInterpreter_.setPosition(
+                motionManager.getCurrentX(),
+                motionManager.getCurrentY()
+            );
+        }
+
+        gcodeInterpreter_.processCommand(
+            rest,
+            motionManager
+        );
+
         return;
     }
 
@@ -302,7 +342,7 @@ void SerialCommandHandler::handleSerialCommand(
 
     if (group == "tablet")
     {
-        if (isHomeSequenceActive())
+        if (homingSequence.isActive())
             {
                 return;
             }
@@ -317,7 +357,7 @@ void SerialCommandHandler::handleSerialCommand(
 
    if (group == "motion")
     {
-        if (isHomeSequenceActive())
+        if (homingSequence.isActive())
         {
             Serial.println("ERR HOME ACTIVE");
             return;
@@ -330,7 +370,7 @@ void SerialCommandHandler::handleSerialCommand(
 
     if (
         (group == "m1" || group == "m2") &&
-        isHomeSequenceActive()
+        homingSequence.isActive()
     )
     {
         Serial.println("ERR HOME ACTIVE");
@@ -1235,7 +1275,7 @@ void SerialCommandHandler::handleMotionCommand(
 
 void SerialCommandHandler::updatePendingMotion()
 {
-    if (isHomeSequenceActive())
+    if (homingSequence.isActive())
     {
         return;
     }

@@ -1,6 +1,7 @@
 #include "MotionManager.hpp"
+#include "HomingSequence.hpp"
 
-extern bool isHomeSequenceActive();
+extern HomingSequence homingSequence;
 extern void sendResponse(const char* message);
 extern RTC_DATA_ATTR uint32_t lastCrashStage;
 
@@ -604,7 +605,7 @@ void MotionManager::setLiveTarget(
 )
 {
 
-    if (isHomeSequenceActive())
+    if (homingSequence.isActive())
     {
         clearLiveTarget();
         return;
@@ -659,7 +660,7 @@ bool MotionManager::followTarget()
     }
 
     double mass = 1.0;
-    double stiffness = 500.0;
+    double stiffness = 600.0;
     double viscocity = 3 * std::sqrt(mass * stiffness);
     double move_time = 0.01;
 

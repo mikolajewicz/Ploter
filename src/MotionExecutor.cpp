@@ -20,58 +20,121 @@ void MotionExecutor::start(
 
 }
 
+
 void MotionExecutor::update()
 {
-    // Jeśli nie ma aktywnej trajektorii, to nic nie robimy.
-    if (!active) {
+    if (!active)
+    {
         return;
     }
 
-    // Która godzina?
-    uint32_t currentTime = micros();
+    if (!motorDriver.isEnabled() || intervalDurationUs == 0)
+    {
+        stop();
+        return;
+    }
 
-    if (static_cast<int32_t>(currentTime - nextIntervalTime) >= 0) {
+    uint32_t now = micros();
 
-        if (currentInterval >= trajectory.size()) {
-            active = false;
-            return;
-        }
+    // ----------------------------------------
+    // 1. Wykonaj kroki bieżącego przedziału
+    // ----------------------------------------
 
-        int stepValue = trajectory[currentInterval];
-        nextIntervalTime += intervalDurationUs;
-        stepsRemaining = std::abs(stepValue);
-
-        if (stepValue > 0) {
-            motorDriver.setDirection(false);
-        } else if (stepValue < 0) {
-            motorDriver.setDirection(true);
-        } else {
-            // Jeśli stepValue == 0, to nie zmieniamy kierunku.
-        }
-
-        if (stepsRemaining > 0) {
-            stepPeriodUs =
-            intervalDurationUs /
-            static_cast<uint32_t>(stepsRemaining);
-
+    if (stepsRemaining > 0)
+    {
+        if (
+            static_cast<int32_t>(
+                now - nextStepTime
+            ) >= 0
+        )
+        {
             motorDriver.step();
             stepsRemaining--;
 
-            nextStepTime = currentTime + stepPeriodUs;
-        } 
-        else {
-            stepPeriodUs = 0;
+            // Termin następnego kroku
+            nextStepTime += stepPeriodUs;
+
+            // Jeśli jesteśmy już spóźnieni,
+            // nie nadrabiaj kroków serią impulsów.
+            uint32_t afterStep = micros();
+
+            if (
+                static_cast<int32_t>(
+                    afterStep - nextStepTime
+                ) >= 0
+            )
+            {
+                nextStepTime =
+                    afterStep + stepPeriodUs;
+            }
         }
-        currentInterval++;
+
+        // Nie przechodzimy do następnego przedziału,
+        // dopóki nie wykonamy wszystkich kroków.
+        return;
     }
 
-    if (stepsRemaining > 0 &&static_cast<int32_t>(currentTime - nextStepTime) >= 0) {
-        
-        nextStepTime += stepPeriodUs;
-        stepsRemaining--;
+    // ----------------------------------------
+    // 2. Poczekaj na następny przedział
+    // ----------------------------------------
 
-        motorDriver.step();
+    if (
+        static_cast<int32_t>(
+            now - nextIntervalTime
+        ) < 0
+    )
+    {
+        return;
     }
 
+    // ----------------------------------------
+    // 3. Sprawdź koniec trajektorii
+    // ----------------------------------------
 
+    if (currentInterval >= trajectory.size())
+    {
+        active = false;
+        return;
+    }
+
+    // ----------------------------------------
+    // 4. Pobierz nowy przedział
+    // ----------------------------------------
+
+    int stepValue = trajectory[currentInterval];
+
+    currentInterval++;
+
+    // Każdy przedział otrzymuje pełny czas.
+    // W razie opóźnienia cała trajektoria
+    // może trwać dłużej.
+    nextIntervalTime = now + intervalDurationUs;
+
+    stepsRemaining = std::abs(stepValue);
+
+    if (stepsRemaining == 0)
+    {
+        return;
+    }
+
+    // ----------------------------------------
+    // 5. Ustaw kierunek
+    // ----------------------------------------
+
+    motorDriver.setDirection(stepValue < 0);
+
+    // ----------------------------------------
+    // 6. Wyznacz odstęp między krokami
+    // ----------------------------------------
+
+    stepPeriodUs =
+        intervalDurationUs /
+        static_cast<uint32_t>(stepsRemaining);
+
+    if (stepPeriodUs == 0)
+    {
+        stepPeriodUs = 1;
+    }
+
+    nextStepTime = micros() + stepPeriodUs;
 }

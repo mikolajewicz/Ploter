@@ -438,46 +438,81 @@ bool Kinematics::generateArc(
         return false;
     }
 
-    double startAngle = std::atan2(pointA_y - center_y, pointA_x - center_x);
-    double endAngle = std::atan2(pointB_y - center_y, pointB_x - center_x);
+    
+    double startAngle = std::atan2(
+        pointA_y - center_y,
+        pointA_x - center_x
+    );
 
-    if (clockwise && endAngle > startAngle) {
-        endAngle -= 2 * M_PI;
-    } else if (!clockwise && endAngle < startAngle) {
-        endAngle += 2 * M_PI;
+    double endAngle = std::atan2(
+        pointB_y - center_y,
+        pointB_x - center_x
+    );
+
+    // Wyznacz dodatni kąt łuku
+    double sweep = clockwise
+        ? startAngle - endAngle
+        : endAngle - startAngle;
+
+    sweep = std::fmod(sweep, 2.0 * M_PI);
+
+    if (sweep <= 0.0)
+    {
+        sweep += 2.0 * M_PI;
     }
 
-    double angleDiff = std::abs(endAngle - startAngle);
-    double arcLength = radiusA * angleDiff;
-    double time = arcLength / speed;
+    // Kierunek obrotu
+    double signedSweep = clockwise
+        ? -sweep
+        : sweep;
 
-    size_t samples = static_cast<size_t>(time / timeStep);
+    double arcLength = radiusA * sweep;
+    double duration = arcLength / speed;
+
+    if (!std::isfinite(duration) || duration <= 0.0)
+    {
+        return false;
+    }
+
+    // Liczba przedziałów trajektorii
+    size_t samples = static_cast<size_t>(
+        std::ceil(duration / timeStep)
+    );
+
+    if (samples < 1)
+    {
+        samples = 1;
+    }
 
     x_vect.clear();
     y_vect.clear();
 
-    x_vect.reserve(
-        samples + 2
-    );
+    x_vect.reserve(samples + 1);
+    y_vect.reserve(samples + 1);
 
-    y_vect.reserve(
-        samples + 2
-    );
+    // Generowanie punktów łuku
+    for (size_t i = 0; i <= samples; ++i)
+    {
+        double progress =
+            static_cast<double>(i) /
+            static_cast<double>(samples);
 
-    for (size_t i = 0; i <= samples; ++i) {
-        double t = i * timeStep;
-        double progress = t / time;
-        double currentAngle = startAngle + (endAngle - startAngle) * progress;
+        double angle =
+            startAngle + signedSweep * progress;
 
-        x_vect.push_back(center_x + radiusA * std::cos(currentAngle));
-        y_vect.push_back(center_y + radiusA * std::sin(currentAngle));
+        double x =
+            center_x + radiusA * std::cos(angle);
+
+        double y =
+            center_y + radiusA * std::sin(angle);
+
+        x_vect.push_back(x);
+        y_vect.push_back(y);
     }
 
-    // Ensure the last point is exactly pointB
-    if (samples * timeStep < time) {
-        x_vect.push_back(pointB_x);
-        y_vect.push_back(pointB_y);
-    }
+    // Gwarantujemy dokładny punkt końcowy
+    x_vect.back() = pointB_x;
+    y_vect.back() = pointB_y;
 
     return true;
 }

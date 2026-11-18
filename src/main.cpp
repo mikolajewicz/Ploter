@@ -9,126 +9,26 @@
 #include "Kinematics.hpp"
 #include "MotionManager.hpp"
 #include "PenController.hpp"
-#include <WiFi.h>
-#include "secrets.h"
-#include <ArduinoOTA.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "GCodeStorage.hpp"
 #include "GCodeProgram.hpp"
 #include "esp_system.h"
 #include "CommunicationManager.hpp"
+#include "NetworkManager.hpp"
+#include "HomingSequence.hpp"
+#include "PlotterController.hpp"
 
 RTC_DATA_ATTR uint32_t lastCrashStage = 0;
 
 esp_reset_reason_t bootResetReason =
     ESP_RST_UNKNOWN;
 
-constexpr bool BYPASS_HOME = true;
-
-void testReadGCode();
-void stopPlotter();
-
-// --------------------------------------------------
-// Konfiguracja WIFI
-// --------------------------------------------------
-
-void setupWiFi()
-{
-    WiFi.mode(WIFI_STA);
-
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    Serial.print("Connecting to WiFi");
-
-
-    unsigned long start = millis();
-
-    while (
-        WiFi.status() != WL_CONNECTED &&
-        millis() - start < 10000
-    )
-    {
-        delay(100);
-        Serial.print(".");
-    }
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        Serial.println();
-        Serial.print("ESP IP: ");
-        Serial.println(WiFi.localIP());
-
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            ArduinoOTA.setHostname("ploter-esp32");
-            ArduinoOTA.setPassword(OTA_PASSWORD);
-
-            ArduinoOTA.onStart([]() {
-                // Nie rozpoczynaj aktualizacji podczas ruchu.
-                // Docelowo tutaj wyłączamy sterowanie silnikami
-                // i anulujemy wszystkie ruchy.
-                Serial.println("OTA START");
-            });
-
-            ArduinoOTA.begin();
-
-            Serial.println("OTA READY");
-            Serial.println(WiFi.localIP());
-        }
-    }
-    else
-    {
-        Serial.println("WiFi connection failed");
-    }
-
-}
-
-void maintainWiFi()
-{
-    static uint32_t lastReconnectAttempt = 0;
-
-    if (WiFi.status() == WL_CONNECTED)
-        return;
-
-    if (millis() - lastReconnectAttempt < 5000)
-        return;
-
-    lastReconnectAttempt = millis();
-
-    Serial.println("WiFi reconnecting...");
-    WiFi.reconnect();
-}
-
-void otaTask(void* parameter)
-{
-    while (true)
-    {
-        maintainWiFi();
-
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            ArduinoOTA.handle();
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
+constexpr bool BYPASS_HOME = false;
 
 // --------------------------------------------------
 // Konfiguracja TMC2209
 // --------------------------------------------------
-
-
-
-constexpr double HOME_ANGLE_M1 = 141.866 - 180.0;
-constexpr double HOME_ANGLE_M2 = 180.0 - 141.866;
-
-constexpr double HOME_OFFSET_M1 = 101.0 + HOME_ANGLE_M1;
-constexpr double HOME_OFFSET_M2 = -101.0 + HOME_ANGLE_M2;
-
-constexpr double HOME_OFFSET_TIME = 2.0;
-constexpr double HOME_OFFSET_ACCEL_TIME = 0.5;
 
 constexpr int SERVO_PIN = 23;
 
@@ -233,9 +133,6 @@ TrajectoryGenerator trajectory_generator2(stepsPerRevolution);
 // HOMING
 // --------------------------------------------------
 
-bool motor1Homed = false;
-bool motor2Homed = false;
-
 Homing homingMotor1(
     motor1,
     tmc1,
@@ -250,18 +147,8 @@ Homing homingMotor2(
     DIAG2_PIN
 );
 
-int homeState = 0;
-
-void startHomeSequence();
-
-void updateHomeSequence(
-    bool homing1Finished,
-    bool homing2Finished
-);
-
-int64_t angleToSteps(double angle);
-
 void testMotor1Direction();
+void testReadGCode();
 
 Kinematics Solver;
 
@@ -271,24 +158,9 @@ Kinematics Solver;
 
 PenController pen(
     SERVO_PIN,
-    60,     // góra
+    135,     // góra
     90      // dół
 );
-
-bool requestHomeSequence()
-{
-    // Bazowanie jest już w toku
-    if (homeState >= 1 && homeState <= 3) {
-        return false;
-    }
-
-    // Podnieś pióro przed bazowaniem
-    pen.up();
-
-    startHomeSequence();
-
-    return true;
-}
 
 GCodeStorage gcodeStorage;
 
@@ -307,6 +179,28 @@ MotionManager motionManager(
 
     Solver,
     pen
+);
+
+HomingSequence homingSequence(
+    motor1,
+    tmc1,
+    motion_executor1,
+    trajectory_generator1,
+    homingMotor1,
+
+    motor2,
+    tmc2,
+    motion_executor2,
+    trajectory_generator2,
+    homingMotor2,
+
+    motionManager,
+    pen,
+
+    stepsPerRevolution,
+    INITIAL_RMS_CURRENT,
+    TIME_STEP,
+    BYPASS_HOME
 );
 
 GCodeProgram gcodeProgram(
@@ -330,171 +224,15 @@ SerialCommandHandler serialCommandHandler(
     motionManager
 );
 
-bool isHomeSequenceActive()
-{
-    return homeState >= 1 && homeState <= 3;
-}
-
-
-// --------------------------------------------------
-// Serwer TCP do odbioru komend
-// --------------------------------------------------
-
-void processTcpCommands()
-{
-    TcpCommand command = {};
-
-    if (
-        tcpCommands != nullptr &&
-        xQueueReceive(
-            tcpCommands,
-            &command,
-            0
-        ) == pdTRUE
-    )
-    {
-        if (
-            strcmp(
-                command.text,
-                "GCODE_RUN"
-            ) == 0
-        )
-        {
-            if (homeState != 4)
-            {
-                sendResponse(
-                    "ERR GCODE HOME"
-                );
-            }
-            else if (
-                !gcodeProgram.start()
-            )
-            {
-                sendResponse(
-                    "ERR GCODE RUN"
-                );
-            }
-        }
-
-        else if (
-            strcmp(
-                command.text,
-                "stop"
-            ) == 0
-        )
-        {
-            stopPlotter();
-        }
-
-        else if (
-            strcmp(
-                command.text,
-                "DISABLE"
-            ) == 0
-        )
-        {
-            stopPlotter();
-
-            motor1.disable();
-            motor2.disable();
-
-            motor1Homed = false;
-            motor2Homed = false;
-
-            homeState = 0;
-
-            pen.up();
-
-            sendResponse(
-                "MOTORS DISABLED"
-            );
-        }
-
-        else if (
-            strcmp(
-                command.text,
-                "ENABLE"
-            ) == 0
-        )
-        {
-            motor1.enable();
-            motor2.enable();
-
-            sendResponse(
-                "MOTORS ENABLED"
-            );
-        }
-
-        else
-        {
-            serialCommandHandler.processCommand(
-                command.text
-            );
-        }
-
-        
-    }
-
-    // Następnie tylko najnowsza pozycja tabletu.
-    if (
-        tabletCommands != nullptr &&
-        xQueueReceive(
-            tabletCommands,
-            &command,
-            0
-        ) == pdTRUE
-    )
-    {
-        if (!gcodeProgram.isRunning())
-        {
-            serialCommandHandler.processCommand(
-                command.text
-            );
-        }
-    }
-}
-
-void stopPlotter()
-{
-    bool wasHoming =
-        isHomeSequenceActive();
-
-    // Zatrzymaj G-code
-    gcodeProgram.stop();
-
-    // Zatrzymaj tablet
-    motionManager.clearLiveTarget();
-
-    // Usuń przygotowany ruch
-    motionManager.clearPreparedMotion();
-
-    // Usuń oczekującą komendę tabletu
-    if (tabletCommands != nullptr)
-    {
-        xQueueReset(tabletCommands);
-    }
-
-    // Anuluj HOME
-    if (wasHoming)
-    {
-        homingMotor1.abort();
-        homingMotor2.abort();
-
-        motor1Homed = false;
-        motor2Homed = false;
-
-        homeState = 0;
-
-        sendResponse(
-            "HOME ABORTED"
-        );
-    }
-
-    // Zatrzymaj executory i silniki
-    serialCommandHandler.processCommand(
-        "stop"
-    );
-}
+PlotterController plotterController(
+    motor1,
+    motor2,
+    motionManager,
+    homingSequence,
+    pen,
+    gcodeProgram,
+    serialCommandHandler
+);
 
 // --------------------------------------------------
 // setup
@@ -603,7 +341,7 @@ void setup() {
 
     pen.begin();
 
-    setupWiFi();
+    networkManager.begin();
 
     if (communication.begin())
     {
@@ -624,30 +362,17 @@ void setup() {
             );
         }
     }
-
-
-
-    else 
+    else
     {
-        BaseType_t result = xTaskCreatePinnedToCore(
-            tcpTask,
-            "TCP",
-            6144,
-            nullptr,
-            1,
-            nullptr,
-            0
+        Serial.println(
+            "Communication initialization failed"
         );
-
-        if (result != pdPASS)
-        {
-            Serial.println("TCP task creation failed");
-        }
     }
 
 
+
     BaseType_t result = xTaskCreatePinnedToCore(
-        otaTask,
+        NetworkManager::otaTask,
         "OTA",
         6144,
         nullptr,
@@ -661,8 +386,7 @@ void setup() {
         Serial.println("OTA task ERROR");
     }
 
-
-    startHomeSequence();
+    homingSequence.start();
 }
 
 // --------------------------------------------------
@@ -670,67 +394,77 @@ void setup() {
 // --------------------------------------------------
 
 
+
 void loop()
 {
 
+    // ----------------------------------------
+    // Komunikacja USB i TCP
+    // ----------------------------------------
+
     communication.readUsbCommands();
 
-    processTcpCommands();
+    plotterController.processCommands();
 
     serialCommandHandler.updatePendingMotion();
 
+    // ----------------------------------------
+    // Homing
+    // ----------------------------------------
 
-    // Aktualizacja homingu
-    bool homing1Finished =
-        homingMotor1.update();
+    homingSequence.update();
 
-    bool homing2Finished =
-        homingMotor2.update();
-
-    // Aktualizacja sekwencji HOME
-    updateHomeSequence(
-        homing1Finished,
-        homing2Finished
-    );
-
+    // ----------------------------------------
     // Generowanie STEP
+    // ----------------------------------------
+
     motor1.run();
     motor2.run();
 
+    // ----------------------------------------
     // Trajektorie
+    // ----------------------------------------
+
     motion_executor1.update();
     motion_executor2.update();
 
     motionManager.updatePause();
 
+    // ----------------------------------------
+    // G-code
+    // ----------------------------------------
+
     gcodeProgram.update();
 
+    // ----------------------------------------
+    // Wykonywanie przygotowanych ruchów
+    // ----------------------------------------
+
     if (
-        homeState == 4 &&
+        homingSequence.isReady() &&
         !motionManager.isPauseActive() &&
         !motion_executor1.isActive() &&
         !motion_executor2.isActive()
     )
     {
-        if (
-            motionManager.isTrajectoryReady()
-        )
+        if (motionManager.isTrajectoryReady())
         {
             motionManager.startPreparedMotion();
         }
-        else if (
-            !gcodeProgram.isRunning()
-        )
+        else if (!gcodeProgram.isRunning())
         {
             motionManager.followTarget();
         }
     }
 
+    // ----------------------------------------
+    // Wysyłanie pozycji plotera
+    // ----------------------------------------
 
     static uint32_t lastPositionSend = 0;
 
     if (
-        homeState == 4 &&
+        homingSequence.isReady() &&
         millis() - lastPositionSend >= 20
     )
     {
@@ -751,201 +485,7 @@ void loop()
             sendResponse(message);
         }
     }
-}
 
-void updateHomeSequence(
-    bool homing1Finished,
-    bool homing2Finished
-)
-
-{
-    switch (homeState)
-    {
-        case 0:
-        {
-            break;
-        }
-
-        case 1:
-        {
-            if (homing1Finished)
-            {
-                motor1Homed = true;
-                Serial.println("M1 homed");
-            }
-
-            if (homing2Finished)
-            {
-                motor2Homed = true;
-                Serial.println("M2 homed");
-            }
-
-            if (motor1Homed && motor2Homed)
-            {
-                Serial.println("Both motors homed");
-
-                homeState = 2;
-            }
-
-            break;
-        }
-
-        case 2:
-        {
-            bool ok1 =
-                trajectory_generator1.trapezoidalProfile(
-                    HOME_OFFSET_M1,
-                    HOME_OFFSET_TIME,
-                    HOME_OFFSET_ACCEL_TIME,
-                    TIME_STEP
-                );
-
-            bool ok2 =
-                trajectory_generator2.trapezoidalProfile(
-                    HOME_OFFSET_M2,
-                    HOME_OFFSET_TIME,
-                    HOME_OFFSET_ACCEL_TIME,
-                    TIME_STEP
-                );
-
-            if (!ok1 || !ok2)
-            {
-                Serial.println(
-                    "HOME offset trajectory ERROR"
-                );
-
-                homeState = 99;
-                break;
-            }
-
-            trajectory_generator1.convertToSteps();
-            trajectory_generator2.convertToSteps();
-
-            motion_executor1.setTimeStep(TIME_STEP);
-            motion_executor2.setTimeStep(TIME_STEP);
-
-            motion_executor1.start(
-                trajectory_generator1.takeStepTrajectory(),
-                TIME_STEP
-            );
-
-            motion_executor2.start(
-                trajectory_generator2.takeStepTrajectory(),
-                TIME_STEP
-            );
-
-            Serial.println(
-                "Moving from home to zero"
-            );
-
-            homeState = 3;
-
-            break;
-        }
-
-        case 3:
-        {
-            if (
-                !motion_executor1.isActive() &&
-                !motion_executor2.isActive()
-            )
-            {
-                homeState = 4;
-
-                motor1.setStepCount(
-                    angleToSteps(HOME_ANGLE_M1)
-                );
-
-                motor2.setStepCount(
-                    angleToSteps(HOME_ANGLE_M2)
-                );
-
-                tmc1.rms_current(INITIAL_RMS_CURRENT);
-                tmc2.rms_current(INITIAL_RMS_CURRENT);
-
-                sendResponse("HOME sequence finished");
-            }
-
-            
-
-            break;
-        }
-
-        case 4:
-        {
-            break;
-        }
-
-        case 99:
-        {
-            motor1.stop();
-            motor2.stop();
-
-            motion_executor1.stop();
-            motion_executor2.stop();
-
-            break;
-        }
-    }
-}
-
-void startHomeSequence()
-
-{
-    motionManager.clearLiveTarget();
-
-    motion_executor1.stop();
-    motion_executor2.stop();
-
-    motor1.stop();
-    motor2.stop();
-
-    if (BYPASS_HOME)
-    {
-        motor1Homed = true;
-        motor2Homed = true;
-
-        motor1.enable();
-        motor2.enable();
-
-        // Bardzo ważne:
-        // ustawiamy logiczną pozycję tak samo
-        // jak po prawdziwym homingu.
-        motor1.setStepCount(
-            angleToSteps(HOME_ANGLE_M1)
-        );
-
-        motor2.setStepCount(
-            angleToSteps(HOME_ANGLE_M2)
-        );
-
-        homeState = 4;
-
-        sendResponse("HOME sequence finished");
-        return;
-    }
-
-
-    motor1Homed = false;
-    motor2Homed = false;
-
-    motor1.enable();
-    motor2.enable();
-
-    homingMotor1.home();
-    homingMotor2.home();
-
-    homeState = 1;
-
-    sendResponse("HOME sequence started");
-}
-
-int64_t angleToSteps(double angle)
-{
-    return llround(
-        angle / 360.0 *
-        stepsPerRevolution
-    );
 }
 
 void testReadGCode()

@@ -108,6 +108,13 @@ bool GCodeProgram::isMotionLine(
     command.toUpperCase();
 
     return
+        command.startsWith("MVS ") ||
+        command.startsWith("MVS\t") ||
+        command == "MVS" ||
+
+        command.startsWith("G0 ") ||
+        command == "G0" ||
+
         command.startsWith("G0 ") ||
         command == "G0" ||
 
